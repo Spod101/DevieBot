@@ -37,6 +37,8 @@ export async function POST(request: Request) {
     const normalized = text.replace(/^(\/\w+)@\w+/, '$1').trim()
     const [cmd, ...args] = normalized.split(/\s+/)
     const rest = args.join(' ').trim()
+    // Preserve original newlines for multiline body (e.g. bulk task text)
+    const rawRest = normalized.replace(/^\/\w+\s*/, '')
 
     // ── /help or /start ───────────────────────────────────────────────
     if (cmd === '/help' || cmd === '/start') {
@@ -187,13 +189,13 @@ export async function POST(request: Request) {
 
       // ── /addtask fast paths ──────────────────────────────────────────
       if (cmd === '/addtask') {
-        const mentionsInRest = [...rest.matchAll(/@(\w+)/g)]
+        const mentionsInRest = [...rawRest.matchAll(/@(\w+)/g)]
         const hasMultipleMentions = mentionsInRest.length > 1
-        const hasNewlines = rest.includes('\n')
+        const hasNewlines = rawRest.includes('\n')
 
         // Bulk text pasted after /addtask → hand off to bulk parser
         if (hasMultipleMentions || hasNewlines) {
-          const parsed = await parseBulkTasks(rest)
+          const parsed = await parseBulkTasks(rawRest)
           if (parsed.length === 0) {
             await reply('❌ Could not extract tasks from that text.')
             return NextResponse.json({ ok: true })
@@ -221,7 +223,7 @@ export async function POST(request: Request) {
         }
 
         // Simple title (no flags, no @, no commas) → skip NLP entirely
-        const isSimple = !rest.includes('--') && mentionsInRest.length === 0 && !rest.includes(',')
+        const isSimple = !rawRest.includes('--') && mentionsInRest.length === 0 && !rawRest.includes(',')
         if (isSimple) {
           const { data: task, error } = await supabase
             .from('tasks')
