@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { generateStandupMessage, sendTelegramMessage } from '@/lib/standup'
+import { parseBulkTasks, parseMessage } from '@/lib/nlp'
 import type { TaskStatus } from '@/types/database'
 
 const VALID_STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'blocked', 'done']
@@ -69,7 +70,7 @@ export async function POST(request: Request) {
     if (cmd === '/tasks') {
       const { data: tasks } = await supabase
         .from('tasks')
-        .select('id, title, status, priority')
+        .select('id, title, status, priority, assigned_to')
         .neq('status', 'done')
         .order('status')
         .limit(20)
@@ -82,7 +83,8 @@ export async function POST(request: Request) {
       const grouped: Record<string, string[]> = {}
       tasks.forEach((t: any) => {
         if (!grouped[t.status]) grouped[t.status] = []
-        grouped[t.status].push(`• \`${t.id.slice(0, 6)}\` ${t.title}`)
+        const assignee = t.assigned_to ? ` @${t.assigned_to}` : ''
+        grouped[t.status].push(`• \`${t.id.slice(0, 6)}\` ${t.title}${assignee}`)
       })
 
       const labels: Record<string, string> = {
@@ -122,146 +124,166 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    // ── /addtask <title> [--camp <name>] [--priority <level>] ─────────
-    if (cmd === '/addtask') {
+    // ── /addtask, /addcamp, /done, /update — NLP-powered ─────────────
+    if (['/addtask', '/addcamp', '/done', '/update'].includes(cmd)) {
       if (!rest) {
-        await reply(
-          `Usage: \`/addtask <title>\` optionally with \`--camp <name>\` and/or \`--priority <level>\`\n\n` +
-          `*Examples:*\n` +
-          `/addtask Fix login bug\n` +
-          `/addtask Fix login bug --priority high\n` +
-          `/addtask Fix login bug --camp Backend --priority urgent`
-        )
+        const examples: Record<string, string> = {
+          '/addtask': (
+            `Usage: \`/addtask <title>\` — natural language welcome!\n\n` +
+            `*Examples:*\n` +
+            `/addtask fix login bug\n` +
+            `/addtask fix login bug, high priority\n` +
+            `/addtask fix login @dale urgent backend camp`
+          ),
+          '/addcamp': `Usage: \`/addcamp <name>\`\n\n*Example:*\n/addcamp Backend`,
+          '/done': `Usage: \`/done <task id>\`\n\n*Example:*\n/done a1b2c3\n\n_Use /tasks to see IDs_`,
+          '/update': (
+            `Usage: \`/update <id> <status>\` — natural language welcome!\n\n` +
+            `*Examples:*\n` +
+            `/update a1b2c3 in review\n` +
+            `/update a1b2c3 mark as blocked\n\n` +
+            `_Use /tasks to see IDs_`
+          ),
+        }
+        await reply(examples[cmd])
         return NextResponse.json({ ok: true })
       }
 
-      // Extract --camp and --priority flags
-      const campMatch = rest.match(/--camp\s+(.+?)(?=\s+--|$)/i)
-      const priorityMatch = rest.match(/--priority\s+(\w+)/i)
-      const campName = campMatch?.[1]?.trim() ?? null
-      const priority = priorityMatch?.[1]?.toLowerCase() ?? 'medium'
-      const title = rest
-        .replace(/--camp\s+.+?(?=\s+--|$)/i, '')
-        .replace(/--priority\s+\w+/i, '')
-        .trim()
+      // Load context for NLP
+      const [campsRes, tasksRes] = await Promise.all([
+        supabase.from('code_camps').select('name').eq('status', 'active'),
+        supabase.from('tasks').select('id, title, status').neq('status', 'done').limit(20),
+      ])
+      const intent = await parseMessage(text, {
+        camps: (campsRes.data ?? []).map((c: any) => c.name),
+        recentTasks: tasksRes.data ?? [],
+      })
 
-      if (!title) {
-        await reply('❌ Task title cannot be empty.')
-        return NextResponse.json({ ok: true })
-      }
-
-      const validPriority = VALID_PRIORITIES.includes(priority) ? priority : 'medium'
-
-      let campId: string | null = null
-      if (campName) {
-        const { data: camps } = await supabase
-          .from('code_camps').select('id, name').ilike('name', `%${campName}%`).limit(1)
-        if (!camps || camps.length === 0) {
-          await reply(`❌ No camp found matching *"${campName}"*.\nUse /camps to see all camps.`)
+      // ── addtask ──
+      if (intent.intent === 'addtask') {
+        const { title, priority = 'medium', campName, assignedTo } = intent
+        if (!title) {
+          await reply('❌ Task title cannot be empty.')
           return NextResponse.json({ ok: true })
         }
-        campId = camps[0].id
+        const validPriority = VALID_PRIORITIES.includes(priority) ? priority : 'medium'
+        let campId: string | null = null
+        if (campName) {
+          const { data: camps } = await supabase
+            .from('code_camps').select('id, name').ilike('name', `%${campName}%`).limit(1)
+          if (!camps || camps.length === 0) {
+            await reply(`❌ No camp found matching *"${campName}"*.\nUse /camps to see all camps.`)
+            return NextResponse.json({ ok: true })
+          }
+          campId = camps[0].id
+        }
+        const { data: task, error } = await supabase
+          .from('tasks')
+          .insert({ title, status: 'todo', priority: validPriority, order_index: 0, camp_id: campId, assigned_to: assignedTo ?? null })
+          .select().single()
+        if (error || !task) {
+          await reply('❌ Failed to create task.')
+        } else {
+          const where = campName ? ` in *${campName}*` : ''
+          const assignee = assignedTo ? ` · @${assignedTo}` : ''
+          await reply(`✅ Task added${where}!\n*${task.title}*\nID: \`${task.id.slice(0, 8)}\` · ${validPriority}${assignee}`)
+        }
+        return NextResponse.json({ ok: true })
       }
 
-      const { data: task, error } = await supabase
-        .from('tasks')
-        .insert({ title, status: 'todo', priority: validPriority, order_index: 0, camp_id: campId })
-        .select()
-        .single()
-
-      if (error || !task) {
-        await reply('❌ Failed to create task.')
-      } else {
-        const where = campName ? ` in *${campName}*` : ''
-        await reply(`✅ Task added${where}!\n*${task.title}*\nID: \`${task.id.slice(0, 8)}\` · Priority: ${validPriority}`)
+      // ── addcamp ──
+      if (intent.intent === 'addcamp') {
+        const { data: camp, error } = await supabase
+          .from('code_camps')
+          .insert({ name: intent.campName, status: 'active', progress: 0, resources: [] })
+          .select().single()
+        if (error || !camp) {
+          await reply('❌ Failed to create camp.')
+        } else {
+          await reply(`🏕️ Camp *${camp.name}* created!\nAdd tasks with /addtask <title> ${camp.name} camp`)
+        }
+        return NextResponse.json({ ok: true })
       }
-      return NextResponse.json({ ok: true })
+
+      // ── done ──
+      if (intent.intent === 'done') {
+        const { data: tasks } = await supabase
+          .from('tasks').select('id, title').ilike('id', `${intent.taskId}%`).limit(1)
+        if (!tasks || tasks.length === 0) {
+          await reply(`❌ No task found with ID starting with \`${intent.taskId}\``)
+          return NextResponse.json({ ok: true })
+        }
+        await supabase.from('tasks').update({ status: 'done' }).eq('id', tasks[0].id)
+        await reply(`✅ *${tasks[0].title}*\nMarked as done! Great work! 🎉`)
+        return NextResponse.json({ ok: true })
+      }
+
+      // ── update ──
+      if (intent.intent === 'update') {
+        const mappedStatus = STATUS_ALIASES[intent.status] ?? (VALID_STATUSES.includes(intent.status as TaskStatus) ? intent.status as TaskStatus : null)
+        if (!mappedStatus) {
+          await reply(`❌ Unknown status *${intent.status}*\nValid: ${VALID_STATUSES.join(', ')}`)
+          return NextResponse.json({ ok: true })
+        }
+        const { data: tasks } = await supabase
+          .from('tasks').select('id, title').ilike('id', `${intent.taskId}%`).limit(1)
+        if (!tasks || tasks.length === 0) {
+          await reply(`❌ No task found with ID starting with \`${intent.taskId}\``)
+          return NextResponse.json({ ok: true })
+        }
+        await supabase.from('tasks').update({ status: mappedStatus }).eq('id', tasks[0].id)
+        const statusEmoji: Record<string, string> = {
+          todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
+        }
+        await reply(`${statusEmoji[mappedStatus] ?? '📌'} *${tasks[0].title}*\nMoved to: *${mappedStatus.replace(/_/g, ' ')}*`)
+        return NextResponse.json({ ok: true })
+      }
+
+      // NLP fallback
+      if (intent.intent === 'unknown') {
+        await reply(intent.reply)
+        return NextResponse.json({ ok: true })
+      }
     }
 
-    // ── /addcamp <name> ───────────────────────────────────────────────
-    if (cmd === '/addcamp') {
-      if (!rest) {
-        await reply(
-          `Usage: \`/addcamp <name>\`\n\n` +
-          `*Example:*\n` +
-          `/addcamp Backend`
-        )
+    // ── Bulk task assignment (natural language with @mentions) ────────
+    const mentionCount = (text.match(/@\w/g) || []).length
+    if (!cmd.startsWith('/') && mentionCount >= 1) {
+      const parsed = await parseBulkTasks(text)
+      if (parsed.length === 0) {
+        await reply(`❓ Couldn't extract any tasks. Send /help to see what I can do.`)
         return NextResponse.json({ ok: true })
       }
 
-      const { data: camp, error } = await supabase
-        .from('code_camps')
-        .insert({ name: rest, status: 'active', progress: 0, resources: [] })
-        .select()
-        .single()
+      const inserts = parsed.map(t => ({
+        title: t.title,
+        status: 'todo' as TaskStatus,
+        priority: t.priority,
+        order_index: 0,
+        assigned_to: t.assignee,
+        camp_id: null,
+      }))
 
-      if (error || !camp) {
-        await reply('❌ Failed to create camp.')
-      } else {
-        await reply(`🏕️ Camp *${camp.name}* created!\nAdd tasks with /addtask <title> --camp ${camp.name}`)
-      }
-      return NextResponse.json({ ok: true })
-    }
+      const { data: created, error } = await supabase.from('tasks').insert(inserts).select()
 
-    // ── /done <id> ────────────────────────────────────────────────────
-    if (cmd === '/done') {
-      if (!rest) {
-        await reply(
-          `Usage: \`/done <task id>\`\n\n` +
-          `*Example:*\n` +
-          `/done a1b2c3\n\n` +
-          `_Use /tasks to see task IDs_`
-        )
+      if (error || !created) {
+        await reply('❌ Failed to create tasks.')
         return NextResponse.json({ ok: true })
       }
 
-      const { data: tasks } = await supabase
-        .from('tasks').select('id, title').ilike('id', `${rest}%`).limit(1)
+      // Group by assignee for the summary
+      const grouped: Record<string, string[]> = {}
+      created.forEach((t: any) => {
+        const key = t.assigned_to ?? 'unassigned'
+        if (!grouped[key]) grouped[key] = []
+        grouped[key].push(`• ${t.title}`)
+      })
 
-      if (!tasks || tasks.length === 0) {
-        await reply(`❌ No task found with ID starting with \`${rest}\``)
-        return NextResponse.json({ ok: true })
-      }
-
-      await supabase.from('tasks').update({ status: 'done' }).eq('id', tasks[0].id)
-      await reply(`✅ *${tasks[0].title}*\nMarked as done! Great work! 🎉`)
-      return NextResponse.json({ ok: true })
-    }
-
-    // ── /update <id> <status> ─────────────────────────────────────────
-    if (cmd === '/update') {
-      const [taskId, rawStatus] = args
-      if (!taskId || !rawStatus) {
-        await reply(
-          `Usage: \`/update <task id> <status>\`\n\n` +
-          `*Example:*\n` +
-          `/update a1b2c3 in_progress\n\n` +
-          `_Statuses: todo, in_progress, in_review, blocked, done_\n` +
-          `_Use /tasks to see task IDs_`
-        )
-        return NextResponse.json({ ok: true })
-      }
-
-      const mappedStatus = STATUS_ALIASES[rawStatus.toLowerCase()] ?? (VALID_STATUSES.includes(rawStatus as TaskStatus) ? rawStatus as TaskStatus : null)
-      if (!mappedStatus) {
-        await reply(`❌ Unknown status *${rawStatus}*\nValid: ${VALID_STATUSES.join(', ')}`)
-        return NextResponse.json({ ok: true })
-      }
-
-      const { data: tasks } = await supabase
-        .from('tasks').select('id, title').ilike('id', `${taskId}%`).limit(1)
-
-      if (!tasks || tasks.length === 0) {
-        await reply(`❌ No task found with ID starting with \`${taskId}\``)
-        return NextResponse.json({ ok: true })
-      }
-
-      await supabase.from('tasks').update({ status: mappedStatus }).eq('id', tasks[0].id)
-
-      const statusEmoji: Record<string, string> = {
-        todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
-      }
-      await reply(`${statusEmoji[mappedStatus] ?? '📌'} *${tasks[0].title}*\nMoved to: *${mappedStatus.replace(/_/g, ' ')}*`)
+      let msg = `✅ *${created.length} task${created.length > 1 ? 's' : ''} created!*\n\n`
+      Object.entries(grouped).forEach(([assignee, items]) => {
+        msg += `@${assignee}\n${items.join('\n')}\n\n`
+      })
+      await reply(msg.trim())
       return NextResponse.json({ ok: true })
     }
 
