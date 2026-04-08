@@ -1,25 +1,21 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { generateStandupMessage, sendTelegramMessage } from '@/lib/standup'
-import { parseMessage } from '@/lib/nlp'
 import type { TaskStatus } from '@/types/database'
 
-const STATUS_MAP: Record<string, TaskStatus> = {
+const VALID_STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'blocked', 'done']
+const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent']
+
+const STATUS_ALIASES: Record<string, TaskStatus> = {
   todo: 'todo',
-  'to-do': 'todo',
-  'to do': 'todo',
   'in-progress': 'in_progress',
-  'in progress': 'in_progress',
   inprogress: 'in_progress',
   progress: 'in_progress',
   review: 'in_review',
   'in-review': 'in_review',
-  'in review': 'in_review',
   blocked: 'blocked',
   done: 'done',
   complete: 'done',
-  completed: 'done',
-  finish: 'done',
   finished: 'done',
 }
 
@@ -36,26 +32,41 @@ export async function POST(request: Request) {
     const text = (message.text as string).trim()
     const supabase = createServiceClient()
 
-    // ── Fetch context for NLP ──────────────────────────────────────
-    const [campsRes, tasksRes] = await Promise.all([
-      supabase.from('code_camps').select('name').eq('status', 'active'),
-      supabase.from('tasks').select('id, title, status').neq('status', 'done').order('updated_at', { ascending: false }).limit(15),
-    ])
-    const campNames = (campsRes.data || []).map((c: any) => c.name)
-    const recentTasks = tasksRes.data || []
+    // Strip bot username suffix (e.g. /help@MyBot)
+    const normalized = text.replace(/@\w+/, '').trim()
+    const [cmd, ...args] = normalized.split(/\s+/)
+    const rest = args.join(' ').trim()
 
-    // ── Parse intent (NLP handles everything including slash commands) ─
-    const parsed = await parseMessage(text, { camps: campNames, recentTasks })
+    // ── /help or /start ───────────────────────────────────────────────
+    if (cmd === '/help' || cmd === '/start') {
+      await reply(
+        `🤖 *Devie Bot — Commands*\n\n` +
+        `📋 *View*\n` +
+        `/tasks — list active tasks\n` +
+        `/camps — list code camps\n` +
+        `/standup — send standup report\n\n` +
+        `➕ *Create*\n` +
+        `/addtask <title> — add a task\n` +
+        `/addtask <title> --camp <name> — add to a camp\n` +
+        `/addtask <title> --priority high — set priority\n` +
+        `/addcamp <name> — create a new camp\n\n` +
+        `✏️ *Update*\n` +
+        `/done <id> — mark task as done\n` +
+        `/update <id> <status> — update task status\n` +
+        `_Statuses: todo, in\\_progress, in\\_review, blocked, done_`
+      )
+      return NextResponse.json({ ok: true })
+    }
 
-    // ── Execute intent ─────────────────────────────────────────────
-
-    if (parsed.intent === 'standup') {
+    // ── /standup ──────────────────────────────────────────────────────
+    if (cmd === '/standup') {
       const msg = await generateStandupMessage()
       await sendTelegramMessage(msg)
       return NextResponse.json({ ok: true })
     }
 
-    if (parsed.intent === 'tasks') {
+    // ── /tasks ────────────────────────────────────────────────────────
+    if (cmd === '/tasks') {
       const { data: tasks } = await supabase
         .from('tasks')
         .select('id, title, status, priority')
@@ -87,7 +98,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    if (parsed.intent === 'camps') {
+    // ── /camps ────────────────────────────────────────────────────────
+    if (cmd === '/camps') {
       const { data: camps } = await supabase
         .from('code_camps').select('name, status, progress').order('status')
 
@@ -102,18 +114,39 @@ export async function POST(request: Request) {
 
       let msg = `🏕️ *Code Camps*\n\n`
       camps.forEach((c: any) => {
-        const bar = '█'.repeat(Math.round(c.progress / 10)) + '░'.repeat(10 - Math.round(c.progress / 10))
-        msg += `${emoji[c.status]} *${c.name}*\n  ${bar} ${c.progress}%\n\n`
+        const filled = Math.round(c.progress / 10)
+        const bar = '█'.repeat(filled) + '░'.repeat(10 - filled)
+        msg += `${emoji[c.status] ?? '⚪'} *${c.name}*\n  ${bar} ${c.progress}%\n\n`
       })
       await reply(msg)
       return NextResponse.json({ ok: true })
     }
 
-    if (parsed.intent === 'addtask') {
-      const { title, priority = 'medium', campName } = parsed
+    // ── /addtask <title> [--camp <name>] [--priority <level>] ─────────
+    if (cmd === '/addtask') {
+      if (!rest) {
+        await reply('Usage: `/addtask <title>` optionally with `--camp <name>` and/or `--priority <level>`')
+        return NextResponse.json({ ok: true })
+      }
+
+      // Extract --camp and --priority flags
+      const campMatch = rest.match(/--camp\s+(.+?)(?=\s+--|$)/i)
+      const priorityMatch = rest.match(/--priority\s+(\w+)/i)
+      const campName = campMatch?.[1]?.trim() ?? null
+      const priority = priorityMatch?.[1]?.toLowerCase() ?? 'medium'
+      const title = rest
+        .replace(/--camp\s+.+?(?=\s+--|$)/i, '')
+        .replace(/--priority\s+\w+/i, '')
+        .trim()
+
+      if (!title) {
+        await reply('❌ Task title cannot be empty.')
+        return NextResponse.json({ ok: true })
+      }
+
+      const validPriority = VALID_PRIORITIES.includes(priority) ? priority : 'medium'
 
       let campId: string | null = null
-
       if (campName) {
         const { data: camps } = await supabase
           .from('code_camps').select('id, name').ilike('name', `%${campName}%`).limit(1)
@@ -126,55 +159,73 @@ export async function POST(request: Request) {
 
       const { data: task, error } = await supabase
         .from('tasks')
-        .insert({
-          title,
-          status: 'todo',
-          priority: (['low', 'medium', 'high', 'urgent'].includes(priority) ? priority : 'medium') as any,
-          order_index: 0,
-          camp_id: campId,
-        })
+        .insert({ title, status: 'todo', priority: validPriority, order_index: 0, camp_id: campId })
         .select()
         .single()
 
       if (error || !task) {
         await reply('❌ Failed to create task.')
       } else {
-        const where = campName ? ` in *${campName}*` : ' on General Board'
-        await reply(`✅ Task added${where}!\n*${task.title}*\nID: \`${task.id.slice(0, 8)}\` · Priority: ${priority}`)
+        const where = campName ? ` in *${campName}*` : ''
+        await reply(`✅ Task added${where}!\n*${task.title}*\nID: \`${task.id.slice(0, 8)}\` · Priority: ${validPriority}`)
       }
       return NextResponse.json({ ok: true })
     }
 
-    if (parsed.intent === 'addcamp') {
-      const { campName, taskTitle } = parsed
-
-      const { data: camp, error: campError } = await supabase
-        .from('code_camps')
-        .insert({ name: campName, status: 'active', progress: 0, resources: [] })
-        .select()
-        .single()
-
-      if (campError || !camp) {
-        await reply('❌ Failed to create camp.')
+    // ── /addcamp <name> ───────────────────────────────────────────────
+    if (cmd === '/addcamp') {
+      if (!rest) {
+        await reply('Usage: `/addcamp <camp name>`')
         return NextResponse.json({ ok: true })
       }
 
-      const { data: task } = await supabase
-        .from('tasks')
-        .insert({ title: taskTitle, status: 'todo', priority: 'medium', order_index: 0, camp_id: camp.id })
+      const { data: camp, error } = await supabase
+        .from('code_camps')
+        .insert({ name: rest, status: 'active', progress: 0, resources: [] })
         .select()
         .single()
 
-      await reply(
-        `🏕️ Camp *${camp.name}* created!\n` +
-        `✅ Task added: *${task?.title ?? taskTitle}*\nID: \`${task?.id?.slice(0, 8) ?? '—'}\``
-      )
+      if (error || !camp) {
+        await reply('❌ Failed to create camp.')
+      } else {
+        await reply(`🏕️ Camp *${camp.name}* created!\nAdd tasks with /addtask <title> --camp ${camp.name}`)
+      }
       return NextResponse.json({ ok: true })
     }
 
-    if (parsed.intent === 'update') {
-      const { taskId, status } = parsed
-      const mappedStatus = STATUS_MAP[status.toLowerCase()] || status as TaskStatus
+    // ── /done <id> ────────────────────────────────────────────────────
+    if (cmd === '/done') {
+      if (!rest) {
+        await reply('Usage: `/done <task id>`')
+        return NextResponse.json({ ok: true })
+      }
+
+      const { data: tasks } = await supabase
+        .from('tasks').select('id, title').ilike('id', `${rest}%`).limit(1)
+
+      if (!tasks || tasks.length === 0) {
+        await reply(`❌ No task found with ID starting with \`${rest}\``)
+        return NextResponse.json({ ok: true })
+      }
+
+      await supabase.from('tasks').update({ status: 'done' }).eq('id', tasks[0].id)
+      await reply(`✅ *${tasks[0].title}*\nMarked as done! Great work! 🎉`)
+      return NextResponse.json({ ok: true })
+    }
+
+    // ── /update <id> <status> ─────────────────────────────────────────
+    if (cmd === '/update') {
+      const [taskId, rawStatus] = args
+      if (!taskId || !rawStatus) {
+        await reply('Usage: `/update <task id> <status>`\n_Statuses: todo, in\\_progress, in\\_review, blocked, done_')
+        return NextResponse.json({ ok: true })
+      }
+
+      const mappedStatus = STATUS_ALIASES[rawStatus.toLowerCase()] ?? (VALID_STATUSES.includes(rawStatus as TaskStatus) ? rawStatus as TaskStatus : null)
+      if (!mappedStatus) {
+        await reply(`❌ Unknown status *${rawStatus}*\nValid: ${VALID_STATUSES.join(', ')}`)
+        return NextResponse.json({ ok: true })
+      }
 
       const { data: tasks } = await supabase
         .from('tasks').select('id, title').ilike('id', `${taskId}%`).limit(1)
@@ -184,60 +235,19 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true })
       }
 
-      const task = tasks[0]
-      await supabase.from('tasks').update({ status: mappedStatus }).eq('id', task.id)
+      await supabase.from('tasks').update({ status: mappedStatus }).eq('id', tasks[0].id)
 
       const statusEmoji: Record<string, string> = {
         todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
       }
-      await reply(`${statusEmoji[mappedStatus] ?? '📌'} *${task.title}*\nMoved to: *${mappedStatus.replace('_', ' ')}*`)
+      await reply(`${statusEmoji[mappedStatus] ?? '📌'} *${tasks[0].title}*\nMoved to: *${mappedStatus.replace(/_/g, ' ')}*`)
       return NextResponse.json({ ok: true })
     }
 
-    if (parsed.intent === 'done') {
-      const { taskId } = parsed
-
-      const { data: tasks } = await supabase
-        .from('tasks').select('id, title').ilike('id', `${taskId}%`).limit(1)
-
-      if (!tasks || tasks.length === 0) {
-        await reply(`❌ No task found with ID starting with \`${taskId}\``)
-        return NextResponse.json({ ok: true })
-      }
-
-      const task = tasks[0]
-      await supabase.from('tasks').update({ status: 'done' }).eq('id', task.id)
-      await reply(`✅ *${task.title}*\nMarked as done! Great work! 🎉`)
-      return NextResponse.json({ ok: true })
-    }
-
-    if (parsed.intent === 'help') {
-      await reply(
-        `🤖 *Devie Bot — I understand natural language!*\n\n` +
-        `Just tell me what you want:\n\n` +
-        `📝 *Add tasks*\n` +
-        `"add a task to fix the login bug"\n` +
-        `"add high priority task: deploy to production"\n` +
-        `"add a task to CodeCamp: set up CI/CD"\n\n` +
-        `🔄 *Update tasks*\n` +
-        `"mark abc123 as done"\n` +
-        `"move abc123 to in progress"\n` +
-        `"abc123 is blocked"\n\n` +
-        `📋 *View tasks & camps*\n` +
-        `"show me all tasks"\n` +
-        `"what camps do we have"\n` +
-        `"send the standup"\n\n` +
-        `_Or use slash commands: /addtask /tasks /camps /standup /done /help_`
-      )
-      return NextResponse.json({ ok: true })
-    }
-
-    if (parsed.intent === 'unknown') {
-      await reply(parsed.reply)
-      return NextResponse.json({ ok: true })
-    }
-
+    // ── Unknown command ───────────────────────────────────────────────
+    await reply(`❓ Unknown command. Send /help to see what I can do.`)
     return NextResponse.json({ ok: true })
+
   } catch (err: any) {
     console.error('[Telegram webhook error]', err)
     return NextResponse.json({ ok: false, error: err.message }, { status: 500 })
