@@ -53,7 +53,7 @@ export async function POST(request: Request) {
         `✏️ *Update*\n` +
         `/done <id> — mark task as done\n` +
         `/update <id> <status> — update task status\n` +
-        `_Statuses: todo, in\\_progress, in\\_review, blocked, done_`
+        `_Statuses: todo, in_progress, in_review, blocked, done_`
       )
       return NextResponse.json({ ok: true })
     }
@@ -217,7 +217,7 @@ export async function POST(request: Request) {
     if (cmd === '/update') {
       const [taskId, rawStatus] = args
       if (!taskId || !rawStatus) {
-        await reply('Usage: `/update <task id> <status>`\n_Statuses: todo, in\\_progress, in\\_review, blocked, done_')
+        await reply('Usage: `/update <task id> <status>`\n_Statuses: todo, in_progress, in_review, blocked, done_')
         return NextResponse.json({ ok: true })
       }
 
