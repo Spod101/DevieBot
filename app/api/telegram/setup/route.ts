@@ -19,10 +19,6 @@ async function getToken(): Promise<string | null> {
   return data?.bot_token ?? null
 }
 
-export async function GET() {
-  return run()
-}
-
 async function run() {
   const token = await getToken()
   if (!token) {
