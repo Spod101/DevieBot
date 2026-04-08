@@ -68,32 +68,40 @@ export type Database = {
         Row: Task
         Insert: Omit<Task, 'id' | 'created_at' | 'updated_at' | 'tags' | 'comments'>
         Update: Partial<Omit<Task, 'id' | 'created_at' | 'updated_at' | 'tags' | 'comments'>>
+        Relationships: []
       }
       code_camps: {
         Row: CodeCamp
         Insert: Omit<CodeCamp, 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Omit<CodeCamp, 'id' | 'created_at' | 'updated_at'>>
+        Relationships: []
       }
       tags: {
         Row: Tag
         Insert: Omit<Tag, 'id' | 'created_at'>
         Update: Partial<Omit<Tag, 'id' | 'created_at'>>
+        Relationships: []
       }
       task_tags: {
         Row: { task_id: string; tag_id: string }
         Insert: { task_id: string; tag_id: string }
         Update: { task_id?: string; tag_id?: string }
+        Relationships: []
       }
       task_comments: {
         Row: TaskComment
         Insert: Omit<TaskComment, 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Omit<TaskComment, 'id' | 'created_at' | 'updated_at'>>
+        Relationships: []
       }
       telegram_config: {
         Row: TelegramConfig
         Insert: Omit<TelegramConfig, 'id' | 'updated_at'>
         Update: Partial<Omit<TelegramConfig, 'id' | 'updated_at'>>
+        Relationships: []
       }
     }
+    Views: Record<string, never>
+    Functions: Record<string, never>
   }
 }
