@@ -185,6 +185,57 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true })
       }
 
+      // ── /addtask fast paths ──────────────────────────────────────────
+      if (cmd === '/addtask') {
+        const mentionsInRest = [...rest.matchAll(/@(\w+)/g)]
+        const hasMultipleMentions = mentionsInRest.length > 1
+        const hasNewlines = rest.includes('\n')
+
+        // Bulk text pasted after /addtask → hand off to bulk parser
+        if (hasMultipleMentions || hasNewlines) {
+          const parsed = await parseBulkTasks(rest)
+          if (parsed.length === 0) {
+            await reply('❌ Could not extract tasks from that text.')
+            return NextResponse.json({ ok: true })
+          }
+          const inserts = parsed.map(t => ({
+            title: t.title, status: 'todo' as TaskStatus,
+            priority: t.priority, order_index: 0,
+            assigned_to: t.assignee, camp_id: null,
+          }))
+          const { data: created, error } = await supabase.from('tasks').insert(inserts).select()
+          if (error || !created) {
+            await reply('❌ Failed to create tasks.')
+            return NextResponse.json({ ok: true })
+          }
+          const grouped: Record<string, string[]> = {}
+          created.forEach((t: any) => {
+            const key = t.assigned_to ?? 'unassigned'
+            if (!grouped[key]) grouped[key] = []
+            grouped[key].push(`• ${t.title}`)
+          })
+          let msg = `✅ *${created.length} task${created.length > 1 ? 's' : ''} created!*\n\n`
+          Object.entries(grouped).forEach(([a, items]) => { msg += `@${a}\n${items.join('\n')}\n\n` })
+          await reply(msg.trim())
+          return NextResponse.json({ ok: true })
+        }
+
+        // Simple title (no flags, no @, no commas) → skip NLP entirely
+        const isSimple = !rest.includes('--') && mentionsInRest.length === 0 && !rest.includes(',')
+        if (isSimple) {
+          const { data: task, error } = await supabase
+            .from('tasks')
+            .insert({ title: rest, status: 'todo', priority: 'medium', order_index: 0 })
+            .select().single()
+          if (error || !task) {
+            await reply('❌ Failed to create task.')
+          } else {
+            await reply(`✅ Task added!\n*${task.title}*\nID: \`${task.id.slice(0, 6)}\` · medium`)
+          }
+          return NextResponse.json({ ok: true })
+        }
+      }
+
       // Load context for NLP
       const [campsRes, tasksRes] = await Promise.all([
         supabase.from('code_camps').select('name').eq('status', 'active'),
