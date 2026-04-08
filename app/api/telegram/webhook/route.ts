@@ -33,8 +33,8 @@ export async function POST(request: Request) {
     const text = (message.text as string).trim()
     const supabase = createServiceClient()
 
-    // Strip bot username suffix (e.g. /help@MyBot)
-    const normalized = text.replace(/@\w+/, '').trim()
+    // Strip bot username suffix only when directly attached to a command (e.g. /help@MyBot → /help)
+    const normalized = text.replace(/^(\/\w+)@\w+/, '$1').trim()
     const [cmd, ...args] = normalized.split(/\s+/)
     const rest = args.join(' ').trim()
 
@@ -66,36 +66,72 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    // ── /tasks ────────────────────────────────────────────────────────
+    // ── /tasks [@name ...] [--camp <name>] ───────────────────────────
     if (cmd === '/tasks') {
-      const { data: tasks } = await supabase
-        .from('tasks')
-        .select('id, title, status, priority, assigned_to')
-        .neq('status', 'done')
-        .order('status')
-        .limit(20)
+      // Parse filters: @mentions and --camp
+      const mentionedUsers = [...rest.matchAll(/@(\w+)/g)].map(m => m[1].toLowerCase())
+      const campFilter = rest.match(/--camp\s+(.+?)(?=\s+--|$|@)/i)?.[1]?.trim() ?? null
 
-      if (!tasks || tasks.length === 0) {
-        await reply('📋 No active tasks right now.')
-        return NextResponse.json({ ok: true })
+      if (!rest && mentionedUsers.length === 0) {
+        // Show usage hint alongside results only if no filters
       }
 
-      const grouped: Record<string, string[]> = {}
-      tasks.forEach((t: any) => {
-        if (!grouped[t.status]) grouped[t.status] = []
-        const assignee = t.assigned_to ? ` @${t.assigned_to}` : ''
-        grouped[t.status].push(`• \`${t.id.slice(0, 6)}\` ${t.title}${assignee}`)
-      })
+      let query = supabase
+        .from('tasks')
+        .select('id, title, status, priority, assigned_to, camp_id, code_camps(name)')
+        .neq('status', 'done')
+        .order('status')
+        .limit(50)
+
+      if (mentionedUsers.length === 1) {
+        query = query.ilike('assigned_to', mentionedUsers[0])
+      } else if (mentionedUsers.length > 1) {
+        query = query.in('assigned_to', mentionedUsers)
+      }
+
+      const { data: tasks } = await query
+
+      // Filter by camp client-side (camp name lookup)
+      let filtered = tasks ?? []
+      if (campFilter) {
+        filtered = filtered.filter((t: any) =>
+          t.code_camps?.name?.toLowerCase().includes(campFilter.toLowerCase())
+        )
+      }
+
+      if (filtered.length === 0) {
+        const who = mentionedUsers.length ? ` for ${mentionedUsers.map(u => `@${u}`).join(', ')}` : ''
+        const where = campFilter ? ` in *${campFilter}*` : ''
+        await reply(`📋 No active tasks${who}${where}.`)
+        return NextResponse.json({ ok: true })
+      }
 
       const labels: Record<string, string> = {
         todo: '📝 To Do', in_progress: '🔄 In Progress',
         in_review: '👀 In Review', blocked: '🚧 Blocked',
       }
 
-      let msg = `📋 *Active Tasks*\n\n`
+      // Build header
+      const who = mentionedUsers.length ? ` · ${mentionedUsers.map(u => `@${u}`).join(', ')}` : ''
+      const where = campFilter ? ` · ${campFilter}` : ''
+      let msg = `📋 *Tasks${who}${where}*\n\n`
+
+      // Group by status
+      const grouped: Record<string, string[]> = {}
+      filtered.forEach((t: any) => {
+        if (!grouped[t.status]) grouped[t.status] = []
+        const assignee = !mentionedUsers.length && t.assigned_to ? ` · @${t.assigned_to}` : ''
+        const camp = !campFilter && t.code_camps?.name ? ` · ${t.code_camps.name}` : ''
+        grouped[t.status].push(`• \`${t.id.slice(0, 6)}\` ${t.title}${assignee}${camp}`)
+      })
+
       Object.entries(grouped).forEach(([status, items]) => {
         msg += `${labels[status] || status}\n${items.join('\n')}\n\n`
       })
+
+      // Usage hint
+      msg += `_Filter: /tasks @name · /tasks --camp Backend · /tasks @dale @kien_`
+
       await reply(msg)
       return NextResponse.json({ ok: true })
     }
