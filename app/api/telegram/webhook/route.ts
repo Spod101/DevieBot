@@ -125,7 +125,13 @@ export async function POST(request: Request) {
     // ── /addtask <title> [--camp <name>] [--priority <level>] ─────────
     if (cmd === '/addtask') {
       if (!rest) {
-        await reply('Usage: `/addtask <title>` optionally with `--camp <name>` and/or `--priority <level>`')
+        await reply(
+          `Usage: \`/addtask <title>\` optionally with \`--camp <name>\` and/or \`--priority <level>\`\n\n` +
+          `*Examples:*\n` +
+          `/addtask Fix login bug\n` +
+          `/addtask Fix login bug --priority high\n` +
+          `/addtask Fix login bug --camp Backend --priority urgent`
+        )
         return NextResponse.json({ ok: true })
       }
 
@@ -175,7 +181,11 @@ export async function POST(request: Request) {
     // ── /addcamp <name> ───────────────────────────────────────────────
     if (cmd === '/addcamp') {
       if (!rest) {
-        await reply('Usage: `/addcamp <camp name>`')
+        await reply(
+          `Usage: \`/addcamp <name>\`\n\n` +
+          `*Example:*\n` +
+          `/addcamp Backend`
+        )
         return NextResponse.json({ ok: true })
       }
 
@@ -196,7 +206,12 @@ export async function POST(request: Request) {
     // ── /done <id> ────────────────────────────────────────────────────
     if (cmd === '/done') {
       if (!rest) {
-        await reply('Usage: `/done <task id>`')
+        await reply(
+          `Usage: \`/done <task id>\`\n\n` +
+          `*Example:*\n` +
+          `/done a1b2c3\n\n` +
+          `_Use /tasks to see task IDs_`
+        )
         return NextResponse.json({ ok: true })
       }
 
@@ -217,7 +232,13 @@ export async function POST(request: Request) {
     if (cmd === '/update') {
       const [taskId, rawStatus] = args
       if (!taskId || !rawStatus) {
-        await reply('Usage: `/update <task id> <status>`\n_Statuses: todo, in_progress, in_review, blocked, done_')
+        await reply(
+          `Usage: \`/update <task id> <status>\`\n\n` +
+          `*Example:*\n` +
+          `/update a1b2c3 in_progress\n\n` +
+          `_Statuses: todo, in_progress, in_review, blocked, done_\n` +
+          `_Use /tasks to see task IDs_`
+        )
         return NextResponse.json({ ok: true })
       }
 
