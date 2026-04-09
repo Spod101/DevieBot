@@ -288,6 +288,35 @@ export async function POST(request: Request) {
           }
           return NextResponse.json({ ok: true })
         }
+
+        // Single @mention (no flags, no commas) → parse directly without NLP
+        const hasSingleMention = mentionsInRest.length === 1 && !rawRest.includes('--') && !rawRest.includes(',')
+        if (hasSingleMention) {
+          const username = mentionsInRest[0][1].toLowerCase()
+          // Strip the @mention from the raw text to get the title
+          let titleRaw = rawRest.replace(/@\w+/g, '').replace(/\s+/g, ' ').trim()
+          // Extract optional priority keyword
+          let priority = 'medium'
+          const priorityMatch = titleRaw.match(/\b(urgent|high|low|medium)\b/i)
+          if (priorityMatch) {
+            priority = priorityMatch[1].toLowerCase()
+            titleRaw = titleRaw.replace(priorityMatch[0], '').replace(/\s+/g, ' ').trim()
+          }
+          if (!titleRaw) {
+            await reply('❌ Task title cannot be empty.')
+            return NextResponse.json({ ok: true })
+          }
+          const { data: task, error } = await supabase
+            .from('tasks')
+            .insert({ title: titleRaw, status: 'todo', priority, order_index: 0, assigned_to: username })
+            .select().single()
+          if (error || !task) {
+            await reply('❌ Failed to create task.')
+          } else {
+            await reply(`✅ Task added!\n*${task.title}*\nID: \`${task.id.slice(0, 8)}\` · ${priority} · @${username}`)
+          }
+          return NextResponse.json({ ok: true })
+        }
       }
 
       // Load context for NLP
@@ -392,7 +421,7 @@ export async function POST(request: Request) {
     if (!cmd.startsWith('/') && mentionCount >= 1) {
       const parsed = await parseBulkTasks(text)
       if (parsed.length === 0) {
-        await reply(`❓ Couldn't extract any tasks. Send /help to see what I can do.`)
+        // Couldn't extract tasks from this free-form message — stay silent
         return NextResponse.json({ ok: true })
       }
 
@@ -428,8 +457,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    // ── Unknown command ───────────────────────────────────────────────
-    await reply(`❓ Unknown command. Send /help to see what I can do.`)
+    // ── Unknown slash command — silently ignore regular chat ──────────
+    if (cmd.startsWith('/')) {
+      await reply(`❓ Unknown command. Send /help to see what I can do.`)
+    }
     return NextResponse.json({ ok: true })
 
   } catch (err: any) {
