@@ -19,12 +19,9 @@ import {
   ChevronDown,
   ChevronRight,
   Plus,
-  Sun,
-  Moon,
   Loader2,
   RefreshCw,
 } from 'lucide-react'
-import { useTheme } from 'next-themes'
 import { toast } from 'sonner'
 
 const campStatusColor: Record<string, string> = {
@@ -37,7 +34,6 @@ const campStatusColor: Record<string, string> = {
 export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const { theme, setTheme } = useTheme()
   const supabase = createClient()
 
   const [camps, setCamps] = useState<CodeCamp[]>([])
@@ -198,15 +194,6 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="p-3 border-t space-y-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start text-muted-foreground"
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-        >
-          {theme === 'dark' ? <Sun className="h-4 w-4 mr-2" /> : <Moon className="h-4 w-4 mr-2" />}
-          {theme === 'dark' ? 'Light mode' : 'Dark mode'}
-        </Button>
         <Button
           variant="ghost"
           size="sm"
