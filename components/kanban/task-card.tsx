@@ -14,6 +14,7 @@ import {
   GripVertical,
   AlertCircle,
 } from 'lucide-react'
+import { Avatar, AvatarFallback, AvatarImage, AvatarGroup, AvatarGroupCount } from '@/components/ui/avatar'
 import { format, isPast, isToday } from 'date-fns'
 
 interface TaskCardProps {
@@ -121,6 +122,30 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                   <MessageSquare className="h-3 w-3" />
                   {task.comments.length}
                 </div>
+              )}
+
+              {task.assignees && task.assignees.length > 0 && (
+                <AvatarGroup className="ml-auto">
+                  {task.assignees.slice(0, 3).map(member => {
+                    const initials = member.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+                    return (
+                      <Avatar key={member.id} size="sm" title={member.name}>
+                        {member.avatar_url && <AvatarImage src={member.avatar_url} alt={member.name} />}
+                        <AvatarFallback
+                          className="text-[9px] font-semibold text-white"
+                          style={{ backgroundColor: member.color }}
+                        >
+                          {initials}
+                        </AvatarFallback>
+                      </Avatar>
+                    )
+                  })}
+                  {task.assignees.length > 3 && (
+                    <AvatarGroupCount className="text-[9px]">
+                      +{task.assignees.length - 3}
+                    </AvatarGroupCount>
+                  )}
+                </AvatarGroup>
               )}
             </div>
           </div>

@@ -16,7 +16,8 @@ export function useTasks(campId?: string | null) {
       .from('tasks')
       .select(`
         *,
-        tags:task_tags(tag:tags(*))
+        tags:task_tags(tag:tags(*)),
+        assignees:task_assignments(member:members(*))
       `)
       .order('order_index', { ascending: true })
 
@@ -30,10 +31,11 @@ export function useTasks(campId?: string | null) {
     if (error) {
       toast.error('Failed to load tasks')
     } else {
-      // Flatten nested tag join
+      // Flatten nested joins
       const normalized = (data || []).map((t: any) => ({
         ...t,
         tags: t.tags?.map((tt: any) => tt.tag).filter(Boolean) || [],
+        assignees: t.assignees?.map((ta: any) => ta.member).filter(Boolean) || [],
       }))
       setTasks(normalized)
     }
@@ -74,13 +76,20 @@ export function useTasks(campId?: string | null) {
       )
     }
 
+    // Attach assignees if any
+    if (payload.assignees?.length) {
+      await supabase.from('task_assignments').insert(
+        payload.assignees.map((m: any) => ({ task_id: data.id, member_id: m.id }))
+      )
+    }
+
     toast.success('Task created')
     await fetchTasks()
     return data
   }
 
   async function updateTask(id: string, updates: Partial<Task>) {
-    const { tags, comments, ...rest } = updates as any
+    const { tags, comments, assignees, ...rest } = updates as any
 
     const { error } = await supabase.from('tasks').update(rest).eq('id', id)
     if (error) {
@@ -94,6 +103,16 @@ export function useTasks(campId?: string | null) {
       if (tags.length > 0) {
         await supabase.from('task_tags').insert(
           tags.map((tag: any) => ({ task_id: id, tag_id: tag.id }))
+        )
+      }
+    }
+
+    // Update assignees if provided
+    if (assignees !== undefined) {
+      await supabase.from('task_assignments').delete().eq('task_id', id)
+      if (assignees.length > 0) {
+        await supabase.from('task_assignments').insert(
+          assignees.map((m: any) => ({ task_id: id, member_id: m.id }))
         )
       }
     }

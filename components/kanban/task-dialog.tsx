@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { Task, TaskStatus, TaskPriority, Tag, TaskComment } from '@/types/database'
+import type { Task, TaskStatus, TaskPriority, Tag, TaskComment, Member } from '@/types/database'
 import { TASK_PRIORITIES, TASK_STATUSES } from '@/lib/constants'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -18,7 +18,8 @@ import {
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
-import { Trash2, Send, Loader2, Tag as TagIcon, CalendarDays } from 'lucide-react'
+import { Trash2, Send, Loader2, Tag as TagIcon, Users } from 'lucide-react'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 
@@ -42,6 +43,8 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
   const [dueDate, setDueDate] = useState('')
   const [selectedTags, setSelectedTags] = useState<Tag[]>([])
   const [allTags, setAllTags] = useState<Tag[]>([])
+  const [selectedAssignees, setSelectedAssignees] = useState<Member[]>([])
+  const [allMembers, setAllMembers] = useState<Member[]>([])
   const [comments, setComments] = useState<TaskComment[]>([])
   const [newComment, setNewComment] = useState('')
   const [saving, setSaving] = useState(false)
@@ -56,7 +59,9 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
       setStatus(task?.status ?? defaultStatus ?? 'todo')
       setDueDate(task?.due_date ?? '')
       setSelectedTags(task?.tags ?? [])
+      setSelectedAssignees(task?.assignees ?? [])
       fetchAllTags()
+      fetchAllMembers()
       if (task?.id) fetchComments(task.id)
       else setComments([])
     }
@@ -65,6 +70,19 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
   async function fetchAllTags() {
     const { data } = await supabase.from('tags').select('*').order('name')
     if (data) setAllTags(data)
+  }
+
+  async function fetchAllMembers() {
+    const { data } = await supabase.from('members').select('*').order('name')
+    if (data) setAllMembers(data)
+  }
+
+  function toggleAssignee(member: Member) {
+    setSelectedAssignees(prev =>
+      prev.find(m => m.id === member.id)
+        ? prev.filter(m => m.id !== member.id)
+        : [...prev, member]
+    )
   }
 
   async function fetchComments(taskId: string) {
@@ -95,6 +113,7 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
       status,
       due_date: dueDate || null,
       tags: selectedTags,
+      assignees: selectedAssignees,
     })
     setSaving(false)
     onClose()
@@ -229,6 +248,46 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
               })}
             </div>
           </div>
+
+          {/* Assignees */}
+          {allMembers.length > 0 && (
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <Users className="h-3.5 w-3.5" />
+                Assignees
+              </Label>
+              <div className="flex flex-wrap gap-2">
+                {allMembers.map(member => {
+                  const selected = !!selectedAssignees.find(m => m.id === member.id)
+                  const initials = member.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+                  return (
+                    <button
+                      key={member.id}
+                      onClick={() => toggleAssignee(member)}
+                      className={cn(
+                        'flex items-center gap-2 px-2.5 py-1.5 rounded-full text-xs font-medium transition-all border',
+                        selected
+                          ? 'border-transparent text-white'
+                          : 'border-border bg-transparent text-muted-foreground hover:text-foreground hover:border-foreground/30'
+                      )}
+                      style={selected ? { backgroundColor: member.color } : {}}
+                    >
+                      <Avatar size="sm" className="shrink-0">
+                        {member.avatar_url && <AvatarImage src={member.avatar_url} alt={member.name} />}
+                        <AvatarFallback
+                          className="text-[9px] font-semibold text-white"
+                          style={{ backgroundColor: member.color }}
+                        >
+                          {initials}
+                        </AvatarFallback>
+                      </Avatar>
+                      {member.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Comments — only for existing tasks */}
           {!isNew && (

@@ -1,79 +1,96 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import type { Task, CodeCamp } from '@/types/database'
 
+// Q2 deadline: June 30 of the current year
+function getQ2Deadline(from: Date): number {
+  const q2End = new Date(from.getFullYear(), 5, 30) // June 30
+  if (q2End < from) {
+    // already past Q2, use next year's
+    q2End.setFullYear(from.getFullYear() + 1)
+  }
+  const msPerDay = 1000 * 60 * 60 * 24
+  return Math.ceil((q2End.getTime() - from.getTime()) / msPerDay)
+}
+
+// Pick status icon based on camp state and proximity of start_date
+function campIcon(camp: CodeCamp, today: Date): string {
+  if (camp.status === 'completed') return '✅'
+  if (camp.status === 'paused') return '⏸'
+  if (camp.status === 'archived') return '📦'
+  if (!camp.start_date) return '🚀' // TBC / no date set
+  const start = new Date(camp.start_date)
+  const daysAway = Math.ceil((start.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+  if (daysAway <= 14) return '🟢'  // very soon
+  if (daysAway <= 60) return '📌'  // confirmed, upcoming
+  return '🚀'                       // far out / TBC
+}
+
+// Format camp start_date into human-readable form
+function formatCampDate(camp: CodeCamp): string {
+  if (!camp.start_date) return 'TBC'
+  const d = new Date(camp.start_date)
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+}
+
+// Parse description for venue and contact separated by " | "
+// e.g. "Bukidnon State University | Zhi (chapter contact)"
+function parseDescription(desc: string | null): { venue: string | null; contact: string | null } {
+  if (!desc) return { venue: null, contact: null }
+  const parts = desc.split('|').map(s => s.trim())
+  return { venue: parts[0] || null, contact: parts[1] || null }
+}
+
 export async function generateStandupMessage(): Promise<string> {
   const supabase = createServiceClient()
 
   const [tasksRes, campsRes] = await Promise.all([
-    supabase.from('tasks').select('*, tags:task_tags(tag:tags(*))').order('updated_at', { ascending: false }),
-    supabase.from('code_camps').select('*').eq('status', 'active').order('name'),
+    supabase.from('tasks').select('*').order('updated_at', { ascending: false }),
+    supabase.from('code_camps').select('*').order('start_date', { ascending: true, nullsFirst: false }),
   ])
 
-  const tasks: Task[] = (tasksRes.data || []).map((t: any) => ({
-    ...t,
-    tags: t.tags?.map((tt: any) => tt.tag).filter(Boolean) || [],
-  }))
-  const camps: CodeCamp[] = campsRes.data || []
+  const tasks: Task[] = tasksRes.data || []
+  const allCamps: CodeCamp[] = campsRes.data || []
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  const doneTasks = tasks.filter(t => t.status === 'done')
-  const inProgressTasks = tasks.filter(t => t.status === 'in_progress')
-  const todoTasks = tasks.filter(t => t.status === 'todo')
-  const blockedTasks = tasks.filter(t => t.status === 'blocked')
-  const overdueTasks = tasks.filter(t =>
-    t.due_date && new Date(t.due_date) < today && t.status !== 'done'
-  )
-  const urgentTasks = tasks.filter(t =>
-    t.priority === 'urgent' && t.status !== 'done'
-  )
+  // KPI metrics
+  const completedCamps = allCamps.filter(c => c.status === 'completed').length
+  const totalCamps = allCamps.length
+  const openRisks = tasks.filter(t => t.status === 'blocked' || t.priority === 'urgent' && t.status !== 'done').length
+  const daysToQ2 = getQ2Deadline(today)
 
-  function formatTaskList(list: Task[], limit = 5): string {
-    if (list.length === 0) return '  _None_'
-    const shown = list.slice(0, limit).map(t => `  • ${t.title}`)
-    const extra = list.length > limit ? `  _...and ${list.length - limit} more_` : ''
-    return [...shown, extra].filter(Boolean).join('\n')
-  }
+  // Upcoming camps: active + paused, sorted by start_date
+  const upcomingCamps = allCamps.filter(c => c.status === 'active' || c.status === 'paused')
 
   const date = today.toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   })
 
-  let message = `📋 *Daily Standup — ${date}*\n\n`
+  let msg = `📝 *DEVCON OPS — DAILY DSU*\n`
+  msg += `${date}\n\n`
 
-  message += `✅ *Done*\n${formatTaskList(doneTasks)}\n\n`
-  message += `🔄 *In Progress*\n${formatTaskList(inProgressTasks)}\n\n`
-  message += `📝 *To Do*\n${formatTaskList(todoTasks)}\n\n`
+  msg += `📊 *KPI SNAPSHOT*\n`
+  msg += `Code Camps: *${completedCamps}/${totalCamps} completed*\n`
+  msg += `Days to Q2 deadline: *${daysToQ2} days*\n`
+  msg += `Open Risks: *${openRisks}*\n\n`
 
-  if (blockedTasks.length > 0) {
-    message += `🚧 *Blocked*\n${formatTaskList(blockedTasks)}\n\n`
-  }
+  if (upcomingCamps.length > 0) {
+    msg += `📅 *UPCOMING CAMPS*\n`
+    upcomingCamps.forEach(camp => {
+      const icon = campIcon(camp, today)
+      const dateStr = formatCampDate(camp)
+      msg += `${icon} *${camp.name}* — ${dateStr}\n`
 
-  if (overdueTasks.length > 0) {
-    message += `⏰ *Overdue* (${overdueTasks.length})\n${formatTaskList(overdueTasks)}\n\n`
-  }
-
-  if (urgentTasks.length > 0) {
-    message += `🚨 *Urgent* (${urgentTasks.length})\n${formatTaskList(urgentTasks)}\n\n`
-  }
-
-  if (camps.length > 0) {
-    message += `🏕️ *Active Code Camps*\n`
-    camps.forEach(c => {
-      const bar = buildProgressBar(c.progress)
-      message += `  • *${c.name}* ${bar} ${c.progress}%\n`
+      const { venue, contact } = parseDescription(camp.description)
+      const venuePart = venue ? `📍 ${venue}` : null
+      const contactPart = contact ? `👤 ${contact}` : null
+      const subLine = [venuePart, contactPart].filter(Boolean).join(' · ')
+      if (subLine) msg += `   ${subLine}\n`
     })
   }
 
-  message += `\n_Tasks: ${doneTasks.length}/${tasks.length} done · ${inProgressTasks.length} in progress_`
-
-  return message
-}
-
-function buildProgressBar(pct: number): string {
-  const filled = Math.round(pct / 10)
-  return '█'.repeat(filled) + '░'.repeat(10 - filled)
+  return msg.trimEnd()
 }
 
 export async function sendTelegramMessage(text: string): Promise<{ ok: boolean; error?: string }> {

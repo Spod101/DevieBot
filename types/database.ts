@@ -9,6 +9,14 @@ export interface Tag {
   created_at: string
 }
 
+export interface Member {
+  id: string
+  name: string
+  color: string
+  avatar_url: string | null
+  created_at: string
+}
+
 export interface CodeCamp {
   id: string
   name: string
@@ -40,6 +48,7 @@ export interface Task {
   updated_at: string
   tags?: Tag[]
   comments?: TaskComment[]
+  assignees?: Member[]
 }
 
 export interface TaskComment {
@@ -92,6 +101,18 @@ export type Database = {
         Row: TaskComment
         Insert: Omit<TaskComment, 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Omit<TaskComment, 'id' | 'created_at' | 'updated_at'>>
+        Relationships: []
+      }
+      members: {
+        Row: Member
+        Insert: Omit<Member, 'id' | 'created_at'>
+        Update: Partial<Omit<Member, 'id' | 'created_at'>>
+        Relationships: []
+      }
+      task_assignments: {
+        Row: { task_id: string; member_id: string }
+        Insert: { task_id: string; member_id: string }
+        Update: { task_id?: string; member_id?: string }
         Relationships: []
       }
       telegram_config: {

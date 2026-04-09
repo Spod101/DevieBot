@@ -77,6 +77,26 @@ create table task_comments (
 );
 
 -- ============================================================
+-- MEMBERS (team members for task assignment)
+-- ============================================================
+create table members (
+  id uuid primary key default uuid_generate_v4(),
+  name text not null,
+  color text not null default '#6366f1', -- for avatar fallback background
+  avatar_url text,
+  created_at timestamptz default now()
+);
+
+-- ============================================================
+-- TASK ASSIGNMENTS (junction)
+-- ============================================================
+create table task_assignments (
+  task_id uuid references tasks(id) on delete cascade,
+  member_id uuid references members(id) on delete cascade,
+  primary key (task_id, member_id)
+);
+
+-- ============================================================
 -- TELEGRAM CONFIG
 -- ============================================================
 create table telegram_config (
@@ -120,6 +140,8 @@ alter table code_camps enable row level security;
 alter table tags enable row level security;
 alter table task_tags enable row level security;
 alter table task_comments enable row level security;
+alter table members enable row level security;
+alter table task_assignments enable row level security;
 alter table telegram_config enable row level security;
 
 -- Allow authenticated users (admin) full access to everything
@@ -136,6 +158,12 @@ create policy "Authenticated full access" on task_tags
   for all to authenticated using (true) with check (true);
 
 create policy "Authenticated full access" on task_comments
+  for all to authenticated using (true) with check (true);
+
+create policy "Authenticated full access" on members
+  for all to authenticated using (true) with check (true);
+
+create policy "Authenticated full access" on task_assignments
   for all to authenticated using (true) with check (true);
 
 create policy "Authenticated full access" on telegram_config
@@ -155,6 +183,12 @@ create policy "Service role full access" on task_tags
   for all to service_role using (true) with check (true);
 
 create policy "Service role full access" on task_comments
+  for all to service_role using (true) with check (true);
+
+create policy "Service role full access" on members
+  for all to service_role using (true) with check (true);
+
+create policy "Service role full access" on task_assignments
   for all to service_role using (true) with check (true);
 
 create policy "Service role full access" on telegram_config
