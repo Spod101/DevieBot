@@ -61,7 +61,15 @@ export default function SettingsPage() {
     const webhookUrl = `${window.location.origin}/api/telegram/webhook`
     try {
       const res = await fetch(
-        `https://api.telegram.org/bot${config.bot_token}/setWebhook?url=${encodeURIComponent(webhookUrl)}`
+        `https://api.telegram.org/bot${config.bot_token}/setWebhook`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: webhookUrl,
+            allowed_updates: ['message', 'chat_member', 'my_chat_member'],
+          }),
+        }
       )
       const data = await res.json()
       if (data.ok) {
