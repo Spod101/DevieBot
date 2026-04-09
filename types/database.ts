@@ -14,6 +14,8 @@ export interface Member {
   name: string
   color: string
   avatar_url: string | null
+  telegram_id: string | null
+  telegram_username: string | null
   created_at: string
 }
 

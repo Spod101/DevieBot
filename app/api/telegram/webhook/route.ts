@@ -20,8 +20,43 @@ const STATUS_ALIASES: Record<string, TaskStatus> = {
   finished: 'done',
 }
 
+// Deterministic color from telegram_id so the same person always gets the same color
+const COLORS = [
+  '#6366f1','#8b5cf6','#ec4899','#ef4444',
+  '#f97316','#eab308','#22c55e','#14b8a6',
+  '#3b82f6','#06b6d4','#64748b','#a855f7',
+]
+function colorForId(id: number): string {
+  return COLORS[Math.abs(id) % COLORS.length]
+}
+
 async function reply(text: string) {
   await sendTelegramMessage(text)
+}
+
+// Auto-register the sender as a member if they're not already in the DB
+async function syncMember(from: {
+  id: number
+  first_name: string
+  last_name?: string
+  username?: string
+}, supabase: ReturnType<typeof createServiceClient>) {
+  const fullName = [from.first_name, from.last_name].filter(Boolean).join(' ')
+  const telegramId = String(from.id)
+
+  await supabase.from('members').upsert(
+    {
+      telegram_id: telegramId,
+      telegram_username: from.username ?? null,
+      name: fullName,
+      color: colorForId(from.id),
+    },
+    {
+      onConflict: 'telegram_id',
+      // Only update name/username in case they changed — never overwrite a custom color
+      ignoreDuplicates: false,
+    }
+  )
 }
 
 export async function POST(request: Request) {
@@ -32,6 +67,11 @@ export async function POST(request: Request) {
 
     const text = (message.text as string).trim()
     const supabase = createServiceClient()
+
+    // Auto-register sender as a member
+    if (message.from && !message.from.is_bot) {
+      await syncMember(message.from, supabase)
+    }
 
     // Strip bot username suffix only when directly attached to a command (e.g. /help@MyBot → /help)
     const normalized = text.replace(/^(\/\w+)@\w+/, '$1').trim()

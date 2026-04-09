@@ -14,7 +14,6 @@ import {
   GripVertical,
   AlertCircle,
 } from 'lucide-react'
-import { Avatar, AvatarFallback, AvatarImage, AvatarGroup, AvatarGroupCount } from '@/components/ui/avatar'
 import { format, isPast, isToday } from 'date-fns'
 
 interface TaskCardProps {
@@ -78,10 +77,10 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
               </p>
             )}
 
-            {/* Tags */}
-            {task.tags && task.tags.length > 0 && (
+            {/* Tags + Assignees as pills */}
+            {((task.tags && task.tags.length > 0) || (task.assignees && task.assignees.length > 0)) && (
               <div className="flex flex-wrap gap-1 mt-2">
-                {task.tags.slice(0, 3).map(tag => (
+                {task.tags?.slice(0, 3).map(tag => (
                   <span
                     key={tag.id}
                     className="px-1.5 py-0.5 text-[10px] rounded-full font-medium"
@@ -90,9 +89,28 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                     {tag.name}
                   </span>
                 ))}
-                {task.tags.length > 3 && (
+                {task.tags && task.tags.length > 3 && (
                   <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-muted text-muted-foreground">
                     +{task.tags.length - 3}
+                  </span>
+                )}
+                {task.assignees?.slice(0, 3).map(member => (
+                  <span
+                    key={member.id}
+                    className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium"
+                    style={{ backgroundColor: member.color + '33', color: member.color }}
+                    title={member.name}
+                  >
+                    <span
+                      className="inline-block h-2 w-2 rounded-full shrink-0"
+                      style={{ backgroundColor: member.color }}
+                    />
+                    {member.name.split(' ')[0]}
+                  </span>
+                ))}
+                {task.assignees && task.assignees.length > 3 && (
+                  <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-muted text-muted-foreground">
+                    +{task.assignees.length - 3}
                   </span>
                 )}
               </div>
@@ -122,30 +140,6 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                   <MessageSquare className="h-3 w-3" />
                   {task.comments.length}
                 </div>
-              )}
-
-              {task.assignees && task.assignees.length > 0 && (
-                <AvatarGroup className="ml-auto">
-                  {task.assignees.slice(0, 3).map(member => {
-                    const initials = member.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-                    return (
-                      <Avatar key={member.id} size="sm" title={member.name}>
-                        {member.avatar_url && <AvatarImage src={member.avatar_url} alt={member.name} />}
-                        <AvatarFallback
-                          className="text-[9px] font-semibold text-white"
-                          style={{ backgroundColor: member.color }}
-                        >
-                          {initials}
-                        </AvatarFallback>
-                      </Avatar>
-                    )
-                  })}
-                  {task.assignees.length > 3 && (
-                    <AvatarGroupCount className="text-[9px]">
-                      +{task.assignees.length - 3}
-                    </AvatarGroupCount>
-                  )}
-                </AvatarGroup>
               )}
             </div>
           </div>

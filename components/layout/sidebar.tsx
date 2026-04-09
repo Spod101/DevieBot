@@ -21,6 +21,7 @@ import {
   Plus,
   Loader2,
   RefreshCw,
+  Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -95,6 +96,7 @@ export function Sidebar() {
     { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
     { href: '/dashboard/board', label: 'General Board', icon: KanbanSquare },
     { href: '/dashboard/camps', label: 'Code Camps', icon: Tent },
+    { href: '/dashboard/team', label: 'Team', icon: Users },
     { href: '/dashboard/settings', label: 'Settings', icon: Settings },
   ]
 
