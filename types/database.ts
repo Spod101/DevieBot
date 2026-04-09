@@ -21,6 +21,8 @@ export interface CodeCamp {
   id: string
   name: string
   description: string | null
+  venue: string | null
+  contact_person: string | null
   status: CampStatus
   progress: number
   start_date: string | null

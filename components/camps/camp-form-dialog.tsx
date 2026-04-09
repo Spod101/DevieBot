@@ -28,6 +28,8 @@ export function CampFormDialog({ camp, open, onClose, onSave, onDelete }: CampFo
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [venue, setVenue] = useState('')
+  const [contactPerson, setContactPerson] = useState('')
   const [status, setStatus] = useState<CampStatus>('active')
   const [progress, setProgress] = useState(0)
   const [startDate, setStartDate] = useState('')
@@ -40,6 +42,8 @@ export function CampFormDialog({ camp, open, onClose, onSave, onDelete }: CampFo
     if (open) {
       setName(camp?.name ?? '')
       setDescription(camp?.description ?? '')
+      setVenue(camp?.venue ?? '')
+      setContactPerson(camp?.contact_person ?? '')
       setStatus(camp?.status ?? 'active')
       setProgress(camp?.progress ?? 0)
       setStartDate(camp?.start_date ?? '')
@@ -67,6 +71,8 @@ export function CampFormDialog({ camp, open, onClose, onSave, onDelete }: CampFo
       ...camp,
       name: name.trim(),
       description: description || null,
+      venue: venue.trim() || null,
+      contact_person: contactPerson.trim() || null,
       status,
       progress,
       start_date: startDate || null,
@@ -106,6 +112,25 @@ export function CampFormDialog({ camp, open, onClose, onSave, onDelete }: CampFo
               placeholder="What is this camp about?"
               rows={2}
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Venue</Label>
+              <Input
+                value={venue}
+                onChange={e => setVenue(e.target.value)}
+                placeholder="e.g. Bukidnon State University"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Contact Person</Label>
+              <Input
+                value={contactPerson}
+                onChange={e => setContactPerson(e.target.value)}
+                placeholder="e.g. Zhi (chapter contact)"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

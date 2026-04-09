@@ -30,6 +30,8 @@ create table code_camps (
   id uuid primary key default uuid_generate_v4(),
   name text not null,
   description text,
+  venue text,           -- e.g. "Bukidnon State University"
+  contact_person text,  -- e.g. "Zhi (chapter contact)"
   status camp_status not null default 'active',
   progress integer not null default 0 check (progress >= 0 and progress <= 100),
   start_date date,

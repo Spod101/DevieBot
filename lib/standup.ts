@@ -29,12 +29,6 @@ function formatCampDate(camp: CodeCamp): string {
   })
 }
 
-// description format: "Venue Name | Contact Name"
-function parseDescription(desc: string | null): { venue: string | null; contact: string | null } {
-  if (!desc) return { venue: null, contact: null }
-  const [venue = null, contact = null] = desc.split('|').map(s => s.trim())
-  return { venue, contact }
-}
 
 const PRIORITY_BADGE: Record<string, string> = {
   urgent: '🔴 URGENT',
@@ -125,11 +119,13 @@ export async function generateStandupMessage(): Promise<string> {
   if (upcomingCamps.length > 0) {
     msg += `\n📅 *UPCOMING CAMPS*\n`
     upcomingCamps.forEach(camp => {
-      const icon    = campIcon(camp, today)
-      const date    = formatCampDate(camp)
-      const { venue, contact } = parseDescription(camp.description)
+      const icon = campIcon(camp, today)
+      const date = formatCampDate(camp)
       msg += `${icon} *${camp.name}* — ${date}\n`
-      const sub = [venue && `📍 ${venue}`, contact && `👤 ${contact}`].filter(Boolean).join(' · ')
+      const sub = [
+        camp.venue          && `📍 ${camp.venue}`,
+        camp.contact_person && `👤 ${camp.contact_person}`,
+      ].filter(Boolean).join(' · ')
       if (sub) msg += `   ${sub}\n`
     })
   }
