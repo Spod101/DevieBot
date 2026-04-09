@@ -62,11 +62,23 @@ async function syncMember(from: {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
+    const supabase = createServiceClient()
+
+    // ── Register member on group entry ────────────────────────────────
+    // Telegram sends chat_member when someone joins a group/channel
+    const memberUpdate = body?.chat_member ?? body?.my_chat_member
+    if (memberUpdate) {
+      const newMember = memberUpdate.new_chat_member
+      if (newMember && !newMember.user?.is_bot && newMember.status !== 'left' && newMember.status !== 'kicked') {
+        await syncMember(newMember.user, supabase)
+      }
+      return NextResponse.json({ ok: true })
+    }
+
     const message = body?.message
     if (!message?.text) return NextResponse.json({ ok: true })
 
     const text = (message.text as string).trim()
-    const supabase = createServiceClient()
 
     // Auto-register sender as a member
     if (message.from && !message.from.is_bot) {

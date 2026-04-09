@@ -78,7 +78,10 @@ export default function SettingsPage() {
     setRegisteringWebhook(false)
   }
 
-  useEffect(() => { fetchConfig() }, [])
+  useEffect(() => {
+    fetchConfig()
+    checkWebhook()
+  }, [])
 
   async function fetchConfig() {
     const { data } = await supabase.from('telegram_config').select('*').limit(1).single()
@@ -267,12 +270,6 @@ export default function SettingsPage() {
               Register Webhook
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            ⚠️ Also run this SQL in Supabase if you haven't yet:
-            <code className="block mt-1 bg-muted px-2 py-1 rounded text-[11px]">
-              alter table members add column if not exists telegram_id text unique, add column if not exists telegram_username text;
-            </code>
-          </p>
         </CardContent>
       </Card>
 
