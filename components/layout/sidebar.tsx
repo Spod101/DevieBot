@@ -22,6 +22,7 @@ import {
   Sun,
   Moon,
   Loader2,
+  RefreshCw,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { toast } from 'sonner'
@@ -42,10 +43,41 @@ export function Sidebar() {
   const [camps, setCamps] = useState<CodeCamp[]>([])
   const [campsOpen, setCampsOpen] = useState(true)
   const [loggingOut, setLoggingOut] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [now, setNow] = useState<Date | null>(null)
 
   useEffect(() => {
     fetchCamps()
   }, [])
+
+  // Manila clock — start after mount to avoid hydration mismatch
+  useEffect(() => {
+    setNow(new Date())
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const manilaTime = now
+    ? now.toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '--:--:--'
+
+  const manilaDate = now
+    ? now.toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    : ''
+
+  const q2Deadline = now
+    ? (() => {
+        const d = new Date(now.toLocaleString('en-PH', { timeZone: 'Asia/Manila' }))
+        return new Date(d.getFullYear(), 5, 30).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })
+      })()
+    : 'Jun 30'
+
+  async function handleSync() {
+    setSyncing(true)
+    router.refresh()
+    await fetchCamps()
+    setSyncing(false)
+  }
 
   async function fetchCamps() {
     const { data } = await supabase
@@ -145,6 +177,24 @@ export function Sidebar() {
           )}
         </div>
       </ScrollArea>
+
+      {/* Manila Clock Widget */}
+      <div className="mx-3 mb-3 rounded-xl bg-muted/60 border border-border/50 px-4 py-3 font-mono">
+        <p className="text-[9px] font-semibold tracking-widest text-muted-foreground uppercase mb-1">Local Time</p>
+        <p className="text-2xl font-bold tracking-tight tabular-nums text-foreground leading-none">
+          {manilaTime}
+        </p>
+        <p className="text-[11px] text-muted-foreground mt-1">{manilaDate}</p>
+        <p className="text-[11px] text-muted-foreground">Q2 Deadline: {q2Deadline}</p>
+        <button
+          onClick={handleSync}
+          disabled={syncing}
+          className="mt-2.5 w-full flex items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background/60 hover:bg-accent transition-colors text-[11px] font-semibold tracking-wide text-muted-foreground hover:text-foreground py-1.5 disabled:opacity-50"
+        >
+          <RefreshCw className={cn('h-3 w-3', syncing && 'animate-spin')} />
+          Sync Dashboard
+        </button>
+      </div>
 
       {/* Footer */}
       <div className="p-3 border-t space-y-1">
