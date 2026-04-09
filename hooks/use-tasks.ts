@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { Task, TaskStatus } from '@/types/database'
+import type { Task, TaskStatus, Member } from '@/types/database'
 import { toast } from 'sonner'
 
 export function useTasks(campId?: string | null) {
@@ -12,13 +12,11 @@ export function useTasks(campId?: string | null) {
 
   const fetchTasks = useCallback(async () => {
     setLoading(true)
+
+    // ── 1. Fetch tasks + tags (single-level join, always reliable) ───────
     let query = supabase
       .from('tasks')
-      .select(`
-        *,
-        tags:task_tags(tag:tags(*)),
-        assignees:task_assignments(member:members(*))
-      `)
+      .select('*, tags:task_tags(tag:tags(*))')
       .order('order_index', { ascending: true })
 
     if (campId === null) {
@@ -27,18 +25,37 @@ export function useTasks(campId?: string | null) {
       query = query.eq('camp_id', campId)
     }
 
-    const { data, error } = await query
+    const { data: tasksData, error } = await query
     if (error) {
       toast.error('Failed to load tasks')
-    } else {
-      // Flatten nested joins
-      const normalized = (data || []).map((t: any) => ({
-        ...t,
-        tags: t.tags?.map((tt: any) => tt.tag).filter(Boolean) || [],
-        assignees: t.assignees?.map((ta: any) => ta.member).filter(Boolean) || [],
-      }))
-      setTasks(normalized)
+      setLoading(false)
+      return
     }
+
+    // ── 2. Fetch assignees separately and merge ──────────────────────────
+    const taskIds = (tasksData || []).map((t: any) => t.id)
+    const assigneesMap: Record<string, Member[]> = {}
+
+    if (taskIds.length > 0) {
+      const { data: assignments } = await supabase
+        .from('task_assignments')
+        .select('task_id, member:members(*)')
+        .in('task_id', taskIds)
+
+      ;(assignments || []).forEach((a: any) => {
+        if (!assigneesMap[a.task_id]) assigneesMap[a.task_id] = []
+        if (a.member) assigneesMap[a.task_id].push(a.member)
+      })
+    }
+
+    // ── 3. Normalize ─────────────────────────────────────────────────────
+    const normalized: Task[] = (tasksData || []).map((t: any) => ({
+      ...t,
+      tags: t.tags?.map((tt: any) => tt.tag).filter(Boolean) || [],
+      assignees: assigneesMap[t.id] || [],
+    }))
+
+    setTasks(normalized)
     setLoading(false)
   }, [campId])
 
@@ -48,7 +65,6 @@ export function useTasks(campId?: string | null) {
 
   async function createTask(payload: Partial<Task> & { title: string }) {
     const tasksInCol = tasks.filter(t => t.status === (payload.status || 'todo'))
-    const order_index = tasksInCol.length
 
     const { data, error } = await supabase
       .from('tasks')
@@ -59,7 +75,7 @@ export function useTasks(campId?: string | null) {
         status: payload.status ?? 'todo',
         due_date: payload.due_date ?? null,
         camp_id: payload.camp_id ?? campId ?? null,
-        order_index,
+        order_index: tasksInCol.length,
       })
       .select()
       .single()
@@ -69,14 +85,12 @@ export function useTasks(campId?: string | null) {
       return null
     }
 
-    // Attach tags if any
     if (payload.tags?.length) {
       await supabase.from('task_tags').insert(
         payload.tags.map((tag: any) => ({ task_id: data.id, tag_id: tag.id }))
       )
     }
 
-    // Attach assignees if any
     if (payload.assignees?.length) {
       await supabase.from('task_assignments').insert(
         payload.assignees.map((m: any) => ({ task_id: data.id, member_id: m.id }))
@@ -97,7 +111,6 @@ export function useTasks(campId?: string | null) {
       return
     }
 
-    // Update tags if provided
     if (tags !== undefined) {
       await supabase.from('task_tags').delete().eq('task_id', id)
       if (tags.length > 0) {
@@ -107,7 +120,6 @@ export function useTasks(campId?: string | null) {
       }
     }
 
-    // Update assignees if provided
     if (assignees !== undefined) {
       await supabase.from('task_assignments').delete().eq('task_id', id)
       if (assignees.length > 0) {
