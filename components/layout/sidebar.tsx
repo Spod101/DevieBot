@@ -99,7 +99,7 @@ export function Sidebar() {
   ]
 
   return (
-    <aside className="flex flex-col w-64 min-h-screen border-r bg-card">
+    <aside className="flex flex-col w-64 h-screen sticky top-0 border-r bg-card">
       {/* Logo */}
       <div className="flex items-center gap-2 px-5 h-16 border-b">
         <div className="p-1.5 rounded-lg bg-primary/10">
