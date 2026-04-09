@@ -15,7 +15,7 @@ export function useMembers() {
     const { data, error } = await supabase
       .from('members')
       .select('*')
-      .order('name', { ascending: true })
+      .order('created_at', { ascending: true })
     if (error) {
       toast.error('Failed to load members')
     } else {
