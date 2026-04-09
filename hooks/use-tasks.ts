@@ -13,7 +13,7 @@ export function useTasks(campId?: string | null) {
   const fetchTasks = useCallback(async () => {
     setLoading(true)
 
-    // ── 1. Fetch tasks + tags (single-level join, always reliable) ───────
+    // ── 1. Tasks + tags ──────────────────────────────────────────────
     let query = supabase
       .from('tasks')
       .select('*, tags:task_tags(tag:tags(*))')
@@ -32,28 +32,29 @@ export function useTasks(campId?: string | null) {
       return
     }
 
-    // ── 2. Fetch assignees separately and merge ──────────────────────────
-    const taskIds = (tasksData || []).map((t: any) => t.id)
-    const assigneesMap: Record<string, Member[]> = {}
+    // ── 2. Members — case-insensitive lookup by username and telegram_id ─
+    const { data: members } = await supabase.from('members').select('*')
+    const byUsername: Record<string, Member> = {}
+    const byTelegramId: Record<string, Member> = {}
+    ;(members || []).forEach((m: Member) => {
+      if (m.telegram_username) byUsername[m.telegram_username.toLowerCase()] = m
+      if (m.telegram_id)       byTelegramId[m.telegram_id] = m
+    })
 
-    if (taskIds.length > 0) {
-      const { data: assignments } = await supabase
-        .from('task_assignments')
-        .select('task_id, member:members(*)')
-        .in('task_id', taskIds)
+    // ── 3. Normalise ─────────────────────────────────────────────────
+    const normalized: Task[] = (tasksData || []).map((t: any) => {
+      const assignedTo: string | null = t.assigned_to ?? null
+      const member = assignedTo
+        ? (byUsername[assignedTo.toLowerCase()] ?? byTelegramId[assignedTo] ?? null)
+        : null
 
-      ;(assignments || []).forEach((a: any) => {
-        if (!assigneesMap[a.task_id]) assigneesMap[a.task_id] = []
-        if (a.member) assigneesMap[a.task_id].push(a.member)
-      })
-    }
-
-    // ── 3. Normalize ─────────────────────────────────────────────────────
-    const normalized: Task[] = (tasksData || []).map((t: any) => ({
-      ...t,
-      tags: t.tags?.map((tt: any) => tt.tag).filter(Boolean) || [],
-      assignees: assigneesMap[t.id] || [],
-    }))
+      return {
+        ...t,
+        assigned_to: assignedTo,
+        tags: t.tags?.map((tt: any) => tt.tag).filter(Boolean) || [],
+        assignees: member ? [member] : [],
+      }
+    })
 
     setTasks(normalized)
     setLoading(false)
@@ -69,12 +70,13 @@ export function useTasks(campId?: string | null) {
     const { data, error } = await supabase
       .from('tasks')
       .insert({
-        title: payload.title,
+        title:       payload.title,
         description: payload.description ?? null,
-        priority: payload.priority ?? 'medium',
-        status: payload.status ?? 'todo',
-        due_date: payload.due_date ?? null,
-        camp_id: payload.camp_id ?? campId ?? null,
+        priority:    payload.priority ?? 'medium',
+        status:      payload.status ?? 'todo',
+        due_date:    payload.due_date ?? null,
+        camp_id:     payload.camp_id ?? campId ?? null,
+        assigned_to: payload.assigned_to ?? null,
         order_index: tasksInCol.length,
       })
       .select()
@@ -85,15 +87,10 @@ export function useTasks(campId?: string | null) {
       return null
     }
 
+    // Attach tags
     if (payload.tags?.length) {
       await supabase.from('task_tags').insert(
         payload.tags.map((tag: any) => ({ task_id: data.id, tag_id: tag.id }))
-      )
-    }
-
-    if (payload.assignees?.length) {
-      await supabase.from('task_assignments').insert(
-        payload.assignees.map((m: any) => ({ task_id: data.id, member_id: m.id }))
       )
     }
 
@@ -111,20 +108,12 @@ export function useTasks(campId?: string | null) {
       return
     }
 
+    // Update tags
     if (tags !== undefined) {
       await supabase.from('task_tags').delete().eq('task_id', id)
       if (tags.length > 0) {
         await supabase.from('task_tags').insert(
           tags.map((tag: any) => ({ task_id: id, tag_id: tag.id }))
-        )
-      }
-    }
-
-    if (assignees !== undefined) {
-      await supabase.from('task_assignments').delete().eq('task_id', id)
-      if (assignees.length > 0) {
-        await supabase.from('task_assignments').insert(
-          assignees.map((m: any) => ({ task_id: id, member_id: m.id }))
         )
       }
     }

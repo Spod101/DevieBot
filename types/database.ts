@@ -45,11 +45,12 @@ export interface Task {
   due_date: string | null
   order_index: number
   camp_id: string | null
+  assigned_to: string | null   // telegram_username stored as text
   created_at: string
   updated_at: string
   tags?: Tag[]
   comments?: TaskComment[]
-  assignees?: Member[]
+  assignees?: Member[]         // derived from assigned_to for display
 }
 
 export interface TaskComment {

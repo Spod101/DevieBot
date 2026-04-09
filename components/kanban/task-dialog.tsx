@@ -43,7 +43,7 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
   const [dueDate, setDueDate] = useState('')
   const [selectedTags, setSelectedTags] = useState<Tag[]>([])
   const [allTags, setAllTags] = useState<Tag[]>([])
-  const [selectedAssignees, setSelectedAssignees] = useState<Member[]>([])
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null)
   const [allMembers, setAllMembers] = useState<Member[]>([])
   const [comments, setComments] = useState<TaskComment[]>([])
   const [newComment, setNewComment] = useState('')
@@ -59,7 +59,8 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
       setStatus(task?.status ?? defaultStatus ?? 'todo')
       setDueDate(task?.due_date ?? '')
       setSelectedTags(task?.tags ?? [])
-      setSelectedAssignees(task?.assignees ?? [])
+      // pre-select the current assignee
+      setSelectedMember(task?.assignees?.[0] ?? null)
       fetchAllTags()
       fetchAllMembers()
       if (task?.id) fetchComments(task.id)
@@ -73,16 +74,13 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
   }
 
   async function fetchAllMembers() {
-    const { data } = await supabase.from('members').select('*').order('name')
+    const { data } = await supabase.from('members').select('*').order('created_at', { ascending: true })
     if (data) setAllMembers(data)
   }
 
   function toggleAssignee(member: Member) {
-    setSelectedAssignees(prev =>
-      prev.find(m => m.id === member.id)
-        ? prev.filter(m => m.id !== member.id)
-        : [...prev, member]
-    )
+    // single-select: clicking the same member deselects
+    setSelectedMember(prev => prev?.id === member.id ? null : member)
   }
 
   async function fetchComments(taskId: string) {
@@ -105,6 +103,10 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
   async function handleSave() {
     if (!title.trim()) return
     setSaving(true)
+    // assigned_to stores the telegram_username (or telegram_id as fallback)
+    const assigned_to = selectedMember
+      ? (selectedMember.telegram_username ?? selectedMember.telegram_id ?? null)
+      : null
     await onSave({
       ...task,
       title: title.trim(),
@@ -112,8 +114,8 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
       priority,
       status,
       due_date: dueDate || null,
+      assigned_to,
       tags: selectedTags,
-      assignees: selectedAssignees,
     })
     setSaving(false)
     onClose()
@@ -258,7 +260,7 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
               </Label>
               <div className="flex flex-wrap gap-2">
                 {allMembers.map(member => {
-                  const selected = !!selectedAssignees.find(m => m.id === member.id)
+                  const selected = selectedMember?.id === member.id
                   const color = memberColor(member)
                   return (
                     <button
