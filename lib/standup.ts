@@ -163,20 +163,37 @@ export async function generateStandupMessage(): Promise<string> {
   msg += `\n📋 *TASK SUMMARY*\n`
   msg += `✅ Done: ${doneTasks.length}  ·  🔄 In Progress: ${inProgress.length}  ·  👀 In Review: ${inReview.length}  ·  📝 To Do: ${todoTasks.length}  ·  🚧 Blocked: ${blockedTasks.length}\n`
 
-  // Bot Commands
-  msg += `\n${'─'.repeat(28)}\n`
-  msg += `💬 *BOT COMMANDS*\n`
-  msg += `/tasks — view all active tasks\n`
-  msg += `/tasks @name — filter by assignee\n`
-  msg += `/tasks \\-\\-camp <name> — filter by camp\n`
-  msg += `/addtask <title> — add a new task\n`
-  msg += `/addtask <title> @name, urgent — NLP supported\n`
-  msg += `/done <id> — mark task as done\n`
-  msg += `/update <id> <status> — update task status\n`
-  msg += `/camps — list all code camps\n`
-  msg += `/addcamp <name> — create a new camp\n`
-  msg += `/standup — trigger this report\n`
-  msg += `/help — full command reference`
+  // Contextual next-action recommendation
+  const firstBlocked   = blockedTasks[0]
+  const firstOverdue   = overdue[0]
+  const firstInProgress = inProgress[0]
+
+  let nextCmd = ''
+  let nextReason = ''
+
+  if (firstBlocked) {
+    const id = (firstBlocked.id as string).slice(0, 6)
+    nextCmd   = `/update ${id} in_progress`
+    nextReason = `unblock *${firstBlocked.title}*`
+  } else if (firstOverdue) {
+    const id = (firstOverdue.id as string).slice(0, 6)
+    nextCmd   = `/done ${id}`
+    nextReason = `close overdue task *${firstOverdue.title}*`
+  } else if (firstInProgress) {
+    const id = (firstInProgress.id as string).slice(0, 6)
+    nextCmd   = `/done ${id}`
+    nextReason = `finish *${firstInProgress.title}*`
+  } else if (todoTasks.length > 0) {
+    nextCmd   = `/tasks`
+    nextReason = `pick up one of the ${todoTasks.length} queued tasks`
+  } else {
+    nextCmd   = `/addtask <title>`
+    nextReason = `queue the next item`
+  }
+
+  msg += `\n💡 *Suggested next:* ${nextCmd}\n`
+  msg += `_→ ${nextReason}_\n`
+  msg += `_Send /help for all commands_`
 
   return msg
 }
