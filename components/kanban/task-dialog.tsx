@@ -19,7 +19,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 import { Trash2, Send, Loader2, Tag as TagIcon, Users } from 'lucide-react'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { memberColor, memberLabel, memberShortLabel } from '@/lib/member-utils'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 
@@ -259,29 +259,24 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
               <div className="flex flex-wrap gap-2">
                 {allMembers.map(member => {
                   const selected = !!selectedAssignees.find(m => m.id === member.id)
-                  const initials = member.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+                  const color = memberColor(member)
                   return (
                     <button
                       key={member.id}
                       onClick={() => toggleAssignee(member)}
                       className={cn(
-                        'flex items-center gap-2 px-2.5 py-1.5 rounded-full text-xs font-medium transition-all border',
+                        'flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-all border',
                         selected
                           ? 'border-transparent text-white'
                           : 'border-border bg-transparent text-muted-foreground hover:text-foreground hover:border-foreground/30'
                       )}
-                      style={selected ? { backgroundColor: member.color } : {}}
+                      style={selected ? { backgroundColor: color } : {}}
                     >
-                      <Avatar size="sm" className="shrink-0">
-                        {member.avatar_url && <AvatarImage src={member.avatar_url} alt={member.name} />}
-                        <AvatarFallback
-                          className="text-[9px] font-semibold text-white"
-                          style={{ backgroundColor: member.color }}
-                        >
-                          {initials}
-                        </AvatarFallback>
-                      </Avatar>
-                      {member.name}
+                      <span
+                        className="inline-block h-2 w-2 rounded-full shrink-0"
+                        style={{ backgroundColor: color }}
+                      />
+                      {memberLabel(member)}
                     </button>
                   )
                 })}

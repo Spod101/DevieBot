@@ -28,18 +28,17 @@ export function useMembers() {
     fetchMembers()
   }, [fetchMembers])
 
-  async function createMember(payload: { name: string; color?: string; avatar_url?: string }) {
+  async function createMember(payload: { telegram_id: string; telegram_username?: string }) {
     const { data, error } = await supabase
       .from('members')
       .insert({
-        name: payload.name,
-        color: payload.color ?? '#6366f1',
-        avatar_url: payload.avatar_url ?? null,
+        telegram_id: payload.telegram_id,
+        telegram_username: payload.telegram_username ?? null,
       })
       .select()
       .single()
     if (error) {
-      toast.error('Failed to create member')
+      toast.error('Failed to add member')
       return null
     }
     toast.success('Member added')
@@ -54,7 +53,7 @@ export function useMembers() {
       return
     }
     toast.success('Member removed')
-    setMembers(prev => prev.filter(m => m.id !== id))
+    setMembers(prev => prev.filter(m => String(m.id) !== String(id)))
   }
 
   return { members, loading, fetchMembers, createMember, deleteMember }

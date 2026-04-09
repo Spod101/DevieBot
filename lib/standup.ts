@@ -59,12 +59,12 @@ export async function generateStandupMessage(): Promise<string> {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  // Normalise assignee names from either join or assigned_to text column
+  // Normalise assignee display labels from telegram_username / telegram_id
   const tasks = rawTasks.map(t => ({
     ...t,
-    _assigneeNames: (
-      (t.assignees as any[])?.map((a: any) => a.member?.name).filter(Boolean)
-    ) as string[] | undefined || (t.assigned_to ? [t.assigned_to as string] : []),
+    _assigneeNames: ((t.assignees as any[]) || [])
+      .map((a: any) => a.telegram_username ? `@${a.telegram_username}` : a.telegram_id ? `#${a.telegram_id}` : null)
+      .filter(Boolean) as string[],
   }))
 
   // ── KPI metrics ────────────────────────────────────────────────────────────

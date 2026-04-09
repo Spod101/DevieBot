@@ -20,15 +20,6 @@ const STATUS_ALIASES: Record<string, TaskStatus> = {
   finished: 'done',
 }
 
-// Deterministic color from telegram_id so the same person always gets the same color
-const COLORS = [
-  '#6366f1','#8b5cf6','#ec4899','#ef4444',
-  '#f97316','#eab308','#22c55e','#14b8a6',
-  '#3b82f6','#06b6d4','#64748b','#a855f7',
-]
-function colorForId(id: number): string {
-  return COLORS[Math.abs(id) % COLORS.length]
-}
 
 async function reply(text: string) {
   await sendTelegramMessage(text)
@@ -41,22 +32,31 @@ async function syncMember(from: {
   last_name?: string
   username?: string
 }, supabase: ReturnType<typeof createServiceClient>) {
-  const fullName = [from.first_name, from.last_name].filter(Boolean).join(' ')
-  const telegramId = String(from.id)
+  try {
+    const telegramId = String(from.id)
 
-  await supabase.from('members').upsert(
-    {
+    // Check if already registered
+    const { data: existing } = await supabase
+      .from('members')
+      .select('id')
+      .eq('telegram_id', telegramId)
+      .maybeSingle()
+
+    if (existing) return // already in DB, nothing to do
+
+    const { error } = await supabase.from('members').insert({
       telegram_id: telegramId,
       telegram_username: from.username ?? null,
-      name: fullName,
-      color: colorForId(from.id),
-    },
-    {
-      onConflict: 'telegram_id',
-      // Only update name/username in case they changed — never overwrite a custom color
-      ignoreDuplicates: false,
+    })
+
+    if (error) {
+      console.error('[syncMember] insert failed:', error.message, error.details)
+    } else {
+      console.log(`[syncMember] registered new member tg:${telegramId} @${from.username ?? 'no-username'}`)
     }
-  )
+  } catch (err: any) {
+    console.error('[syncMember] unexpected error:', err?.message ?? err)
+  }
 }
 
 export async function POST(request: Request) {
@@ -422,6 +422,27 @@ export async function POST(request: Request) {
 
   } catch (err: any) {
     console.error('[Telegram webhook error]', err)
+    return NextResponse.json({ ok: false, error: err.message }, { status: 500 })
+  }
+}
+
+// GET /api/telegram/webhook — check current webhook status from Telegram
+export async function GET() {
+  try {
+    const supabase = createServiceClient()
+    const { data: cfg } = await supabase
+      .from('telegram_config')
+      .select('bot_token')
+      .limit(1)
+      .single()
+
+    const token = process.env.TELEGRAM_BOT_TOKEN ?? cfg?.bot_token
+    if (!token) return NextResponse.json({ ok: false, error: 'Bot token not configured' })
+
+    const res = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`)
+    const data = await res.json()
+    return NextResponse.json(data)
+  } catch (err: any) {
     return NextResponse.json({ ok: false, error: err.message }, { status: 500 })
   }
 }

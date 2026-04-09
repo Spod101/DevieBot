@@ -4,6 +4,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Task } from '@/types/database'
 import { TASK_PRIORITIES } from '@/lib/constants'
+import { memberColor, memberShortLabel } from '@/lib/member-utils'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -94,20 +95,20 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                     +{task.tags.length - 3}
                   </span>
                 )}
-                {task.assignees?.slice(0, 3).map(member => (
-                  <span
-                    key={member.id}
-                    className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium"
-                    style={{ backgroundColor: member.color + '33', color: member.color }}
-                    title={member.name}
-                  >
+                {task.assignees?.slice(0, 3).map(member => {
+                  const color = memberColor(member)
+                  return (
                     <span
-                      className="inline-block h-2 w-2 rounded-full shrink-0"
-                      style={{ backgroundColor: member.color }}
-                    />
-                    {member.name.split(' ')[0]}
-                  </span>
-                ))}
+                      key={member.id}
+                      className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded-full font-medium"
+                      style={{ backgroundColor: color + '33', color }}
+                      title={memberShortLabel(member)}
+                    >
+                      <span className="inline-block h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                      {memberShortLabel(member)}
+                    </span>
+                  )
+                })}
                 {task.assignees && task.assignees.length > 3 && (
                   <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-muted text-muted-foreground">
                     +{task.assignees.length - 3}

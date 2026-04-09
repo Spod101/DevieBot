@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Bot, Send, Sun, Moon, Monitor } from 'lucide-react'
+import { Loader2, Bot, Send, Sun, Moon, Monitor, Webhook, CheckCircle2, XCircle, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
@@ -26,12 +26,56 @@ export default function SettingsPage() {
   const [previewMsg, setPreviewMsg] = useState<string | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const [logs, setLogs] = useState<{ time: string; status: 'ok' | 'error' | 'info'; msg: string }[]>([])
+  const [webhookInfo, setWebhookInfo] = useState<{ url?: string; last_error?: string; pending_count?: number } | null>(null)
+  const [checkingWebhook, setCheckingWebhook] = useState(false)
+  const [registeringWebhook, setRegisteringWebhook] = useState(false)
 
   function addLog(status: 'ok' | 'error' | 'info', msg: string) {
     const time = new Date().toLocaleTimeString('en-PH', {
       timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', second: '2-digit',
     })
     setLogs(prev => [{ time, status, msg }, ...prev].slice(0, 20))
+  }
+
+  async function checkWebhook() {
+    setCheckingWebhook(true)
+    try {
+      const res = await fetch('/api/telegram/webhook')
+      const data = await res.json()
+      if (data.ok) {
+        setWebhookInfo(data.result)
+        if (!data.result?.url) addLog('error', 'Webhook not registered — bot cannot receive messages')
+        else addLog('ok', `Webhook active: ${data.result.url}`)
+      } else {
+        addLog('error', data.error || 'Failed to check webhook')
+      }
+    } catch {
+      addLog('error', 'Could not reach Telegram API')
+    }
+    setCheckingWebhook(false)
+  }
+
+  async function registerWebhook() {
+    if (!config?.bot_token) { toast.error('Save your bot token first'); return }
+    setRegisteringWebhook(true)
+    const webhookUrl = `${window.location.origin}/api/telegram/webhook`
+    try {
+      const res = await fetch(
+        `https://api.telegram.org/bot${config.bot_token}/setWebhook?url=${encodeURIComponent(webhookUrl)}`
+      )
+      const data = await res.json()
+      if (data.ok) {
+        toast.success('Webhook registered!')
+        addLog('ok', `Webhook registered → ${webhookUrl}`)
+        await checkWebhook()
+      } else {
+        toast.error(data.description || 'Failed to register')
+        addLog('error', data.description || 'Webhook registration failed')
+      }
+    } catch {
+      addLog('error', 'Could not reach Telegram API')
+    }
+    setRegisteringWebhook(false)
   }
 
   useEffect(() => { fetchConfig() }, [])
@@ -182,6 +226,53 @@ export default function SettingsPage() {
             {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
             Save Settings
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* Webhook Connection */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Webhook className="h-5 w-5 text-primary" />
+            <CardTitle className="text-base">Bot Connection</CardTitle>
+            {webhookInfo && (
+              webhookInfo.url
+                ? <Badge className="ml-auto bg-green-500/20 text-green-600 border-green-500/30 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" />Active</Badge>
+                : <Badge variant="outline" className="ml-auto text-destructive border-destructive/30 flex items-center gap-1"><XCircle className="h-3 w-3" />Not registered</Badge>
+            )}
+          </div>
+          <CardDescription>
+            The webhook lets Telegram deliver messages to this app — required for auto-member sync and bot commands
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {webhookInfo && (
+            <div className="rounded-lg bg-muted/50 border border-border/50 p-3 space-y-1 text-xs font-mono">
+              <p className="text-muted-foreground">URL: <span className="text-foreground">{webhookInfo.url || '— not set'}</span></p>
+              {webhookInfo.pending_count !== undefined && (
+                <p className="text-muted-foreground">Pending updates: <span className="text-foreground">{webhookInfo.pending_count}</span></p>
+              )}
+              {webhookInfo.last_error && (
+                <p className="text-destructive">Last error: {webhookInfo.last_error}</p>
+              )}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={checkWebhook} disabled={checkingWebhook} className="flex-1">
+              {checkingWebhook ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <RefreshCw className="h-4 w-4 mr-1.5" />}
+              Check Status
+            </Button>
+            <Button onClick={registerWebhook} disabled={registeringWebhook || !configured} className="flex-1">
+              {registeringWebhook ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Webhook className="h-4 w-4 mr-1.5" />}
+              Register Webhook
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            ⚠️ Also run this SQL in Supabase if you haven't yet:
+            <code className="block mt-1 bg-muted px-2 py-1 rounded text-[11px]">
+              alter table members add column if not exists telegram_id text unique, add column if not exists telegram_username text;
+            </code>
+          </p>
         </CardContent>
       </Card>
 

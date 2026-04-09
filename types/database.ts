@@ -10,10 +10,7 @@ export interface Tag {
 }
 
 export interface Member {
-  id: string
-  name: string
-  color: string
-  avatar_url: string | null
+  id: number               // serial integer
   telegram_id: string | null
   telegram_username: string | null
   created_at: string
