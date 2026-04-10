@@ -1,7 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/service'
-import type { Task, CodeCamp } from '@/types/database'
-
-// ─── helpers ────────────────────────────────────────────────────────────────
+import type { CodeCamp } from '@/types/database'
 
 const DIV = '─────────────────────'
 
@@ -25,7 +23,6 @@ function formatCampDate(camp: CodeCamp): string {
   })
 }
 
-// Escape HTML special chars so task titles/usernames never break the parser
 const h = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 const PRIORITY_BADGE: Record<string, string> = {
@@ -34,8 +31,6 @@ const PRIORITY_BADGE: Record<string, string> = {
   medium: '',
   low:    '',
 }
-
-// ─── main generator ─────────────────────────────────────────────────────────
 
 export async function generateStandupMessage(): Promise<string> {
   const supabase = createServiceClient()
@@ -65,7 +60,6 @@ export async function generateStandupMessage(): Promise<string> {
     _assignee: t.assigned_to ? `@${t.assigned_to}` : null,
   }))
 
-  // ── task buckets ───────────────────────────────────────────────────────────
   const inProgress  = tasks.filter(t => t.status === 'in_progress')
   const inReview    = tasks.filter(t => t.status === 'in_review')
   const blocked     = tasks.filter(t => t.status === 'blocked')
@@ -79,13 +73,11 @@ export async function generateStandupMessage(): Promise<string> {
   const upcomingCamps = allCamps.filter(c => c.status === 'active' || c.status === 'paused')
   const completedCamps = allCamps.filter(c => c.status === 'completed').length
 
-  // ── date header ─────────────────────────────────────────────────────────────
   const dateStr = today.toLocaleDateString('en-PH', {
     timeZone: 'Asia/Manila',
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   })
 
-  // ── task line formatter ──────────────────────────────────────────────────────
   function taskLine(t: any): string {
     const code     = t.task_number ? `<code>T-${String(t.task_number).padStart(3, '0')}</code> ` : ''
     const title    = h(t.title)
@@ -97,7 +89,6 @@ export async function generateStandupMessage(): Promise<string> {
     return `▸ ${code}${title}${badge}${assignee}${due}`
   }
 
-  // ── section builder ──────────────────────────────────────────────────────────
   function section(icon: string, label: string, items: any[], limit = 10): string {
     if (items.length === 0) return ''
     let s = `\n\n${icon} <b>${label}</b> <i>(${items.length})</i>\n`
@@ -107,14 +98,11 @@ export async function generateStandupMessage(): Promise<string> {
     return s
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
   let msg = ''
 
-  // ── Header ────────────────────────────────────────────────────────────────
   msg += `📋 <b>DEVCON COHORT 4 — Daily Stand Up</b>\n`
   msg += `<i>${h(dateStr)}</i>\n`
 
-  // ── KPI Snapshot (task-focused) ───────────────────────────────────────────
   msg += `\n📊 <b>KPI SNAPSHOT</b>\n`
   msg += `${DIV}\n`
   msg += `📌 Active Tasks: <b>${activeTasks.length}</b>\n`
@@ -127,7 +115,6 @@ export async function generateStandupMessage(): Promise<string> {
     msg += '\n'
   }
 
-  // ── Upcoming Camps (only if any) ──────────────────────────────────────────
   if (upcomingCamps.length > 0) {
     msg += `\n\n📅 <b>UPCOMING CAMPS</b>\n`
     msg += `${DIV}\n`
@@ -143,13 +130,11 @@ export async function generateStandupMessage(): Promise<string> {
     })
   }
 
-  // ── Task Sections (only non-empty ones shown) ─────────────────────────────
   msg += section('🔄', 'IN PROGRESS', inProgress, 10)
   msg += section('👀', 'IN REVIEW',   inReview,   8)
   msg += section('🚧', 'BLOCKED',     blocked,    10)
   msg += section('⏰', 'OVERDUE',     overdue,    5)
 
-  // ── Task Summary ──────────────────────────────────────────────────────────
   msg += `\n\n📋 <b>TASK SUMMARY</b>\n`
   msg += `${DIV}\n`
   msg += `✅ Done: ${doneTasks.length}\n`
@@ -162,10 +147,8 @@ export async function generateStandupMessage(): Promise<string> {
   return msg
 }
 
-// ─── send helpers ────────────────────────────────────────────────────────────
-
 export interface SendOptions {
-  replyToMessageId?: number   // thread reply to the triggering message
+  replyToMessageId?: number
 }
 
 export async function sendTelegramMessage(
@@ -200,7 +183,6 @@ async function sendMessage(
     chat_id:    chatId,
     text,
     parse_mode: 'HTML',
-    // If the original message was deleted, still send (just without the thread)
     allow_sending_without_reply: true,
   }
   if (options.replyToMessageId) {

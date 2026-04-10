@@ -11,15 +11,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 import { Trash2, Send, Loader2, Tag as TagIcon, Users } from 'lucide-react'
-import { memberColor, memberLabel, memberShortLabel } from '@/lib/member-utils'
+import { memberColor, memberLabel } from '@/lib/member-utils'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 
@@ -59,7 +57,6 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
       setStatus(task?.status ?? defaultStatus ?? 'todo')
       setDueDate(task?.due_date ?? '')
       setSelectedTags(task?.tags ?? [])
-      // pre-select the current assignee
       setSelectedMember(task?.assignees?.[0] ?? null)
       fetchAllTags()
       fetchAllMembers()
@@ -79,7 +76,6 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
   }
 
   function toggleAssignee(member: Member) {
-    // single-select: clicking the same member deselects
     setSelectedMember(prev => prev?.id === member.id ? null : member)
   }
 
@@ -103,7 +99,6 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
   async function handleSave() {
     if (!title.trim()) return
     setSaving(true)
-    // assigned_to stores name (primary), falling back to username or telegram_id
     const assigned_to = selectedMember
       ? (selectedMember.name ?? selectedMember.telegram_username ?? selectedMember.telegram_id ?? null)
       : null
@@ -159,7 +154,6 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
         </DialogHeader>
 
         <div className="space-y-5 py-2">
-          {/* Title */}
           <div className="space-y-1.5">
             <Label>Title *</Label>
             <Input
@@ -170,7 +164,6 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
             />
           </div>
 
-          {/* Description */}
           <div className="space-y-1.5">
             <Label>Description</Label>
             <Textarea
@@ -181,7 +174,6 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
             />
           </div>
 
-          {/* Status + Priority + Due date */}
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <Label>Status</Label>
@@ -221,7 +213,6 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
             </div>
           </div>
 
-          {/* Tags */}
           <div className="space-y-2">
             <Label className="flex items-center gap-1.5">
               <TagIcon className="h-3.5 w-3.5" />
@@ -251,7 +242,6 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
             </div>
           </div>
 
-          {/* Assignees */}
           {allMembers.length > 0 && (
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5">
@@ -286,7 +276,6 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
             </div>
           )}
 
-          {/* Comments — only for existing tasks */}
           {!isNew && (
             <>
               <Separator />
@@ -314,7 +303,6 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
                   </div>
                 )}
 
-                {/* New comment */}
                 <div className="flex gap-2">
                   <Input
                     value={newComment}

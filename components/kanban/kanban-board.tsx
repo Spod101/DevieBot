@@ -28,10 +28,9 @@ import type { TaskPriority } from '@/types/database'
 
 interface KanbanBoardProps {
   campId?: string | null
-  title?: string
 }
 
-export function KanbanBoard({ campId, title }: KanbanBoardProps) {
+export function KanbanBoard({ campId }: KanbanBoardProps) {
   const { tasks, loading, createTask, updateTask, deleteTask, moveTask, reorderTasks } = useTasks(campId)
 
   const [activeTask, setActiveTask] = useState<Task | null>(null)
@@ -68,7 +67,6 @@ export function KanbanBoard({ campId, title }: KanbanBoardProps) {
     const activeId = active.id as string
     const overId = over.id as string
 
-    // Dropped over a column (status)
     const overStatus = TASK_STATUSES.find(s => s.value === overId)?.value as TaskStatus | undefined
 
     if (overStatus) {
@@ -79,7 +77,6 @@ export function KanbanBoard({ campId, title }: KanbanBoardProps) {
       return
     }
 
-    // Dropped over another task
     const overTask = tasks.find(t => t.id === overId)
     const activeTaskFound = tasks.find(t => t.id === activeId)
     if (!overTask || !activeTaskFound) return
@@ -146,9 +143,7 @@ export function KanbanBoard({ campId, title }: KanbanBoardProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* ── Board toolbar ───────────────────────────────────── */}
       <div className="flex items-center gap-3 mb-5 flex-wrap">
-        {/* Search */}
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -159,8 +154,7 @@ export function KanbanBoard({ campId, title }: KanbanBoardProps) {
           />
         </div>
 
-        {/* Priority filter */}
-        <Select value={filterPriority} onValueChange={v => setFilterPriority(v as any)}>
+        <Select value={filterPriority} onValueChange={v => setFilterPriority(v as TaskPriority | 'all')}>
           <SelectTrigger className="w-36 text-sm">
             <SlidersHorizontal className="h-3.5 w-3.5 mr-2 shrink-0 text-muted-foreground" />
             <SelectValue placeholder="Priority" />
@@ -174,7 +168,6 @@ export function KanbanBoard({ campId, title }: KanbanBoardProps) {
           </SelectContent>
         </Select>
 
-        {/* Add task */}
         <button
           onClick={() => openNewTask()}
           className="btn-lime flex items-center gap-2 px-4 py-2 text-sm font-bold"
@@ -184,7 +177,6 @@ export function KanbanBoard({ campId, title }: KanbanBoardProps) {
         </button>
       </div>
 
-      {/* Kanban columns */}
       <DndContext
         sensors={sensors}
         collisionDetection={closestCorners}
@@ -198,7 +190,6 @@ export function KanbanBoard({ campId, title }: KanbanBoardProps) {
               key={col.value}
               status={col.value}
               label={col.label}
-              color={col.color}
               hex={col.hex}
               tasks={getColumnTasks(col.value)}
               onTaskClick={openEditTask}
@@ -216,7 +207,6 @@ export function KanbanBoard({ campId, title }: KanbanBoardProps) {
         </DragOverlay>
       </DndContext>
 
-      {/* Task dialog */}
       <TaskDialog
         task={dialogTask}
         open={dialogOpen}

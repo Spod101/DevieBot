@@ -13,7 +13,6 @@ export function useTasks(campId?: string | null) {
   const fetchTasks = useCallback(async () => {
     setLoading(true)
 
-    // ── 1. Tasks + tags ──────────────────────────────────────────────
     let query = supabase
       .from('tasks')
       .select('*, task_number, tags:task_tags(tag:tags(*))')
@@ -32,7 +31,6 @@ export function useTasks(campId?: string | null) {
       return
     }
 
-    // ── 2. Members — lookup by name, first name, username, or telegram_id ─
     const { data: members } = await supabase.from('members').select('*')
     const byName: Record<string, Member>       = {}
     const byUsername: Record<string, Member>   = {}
@@ -40,7 +38,6 @@ export function useTasks(campId?: string | null) {
     ;(members || []).forEach((m: Member) => {
       if (m.name) {
         byName[m.name.toLowerCase()] = m
-        // Also index first name so "John" matches "John Doe"
         const firstName = m.name.split(' ')[0]
         if (firstName && !byName[firstName.toLowerCase()]) {
           byName[firstName.toLowerCase()] = m
@@ -50,7 +47,6 @@ export function useTasks(campId?: string | null) {
       if (m.telegram_id)       byTelegramId[m.telegram_id] = m
     })
 
-    // ── 3. Normalise ─────────────────────────────────────────────────
     const normalized: Task[] = (tasksData || []).map((t: any) => {
       const assignedTo: string | null = t.assigned_to ?? null
       const key = assignedTo?.toLowerCase() ?? ''
@@ -97,7 +93,6 @@ export function useTasks(campId?: string | null) {
       return null
     }
 
-    // Attach tags
     if (payload.tags?.length) {
       await supabase.from('task_tags').insert(
         payload.tags.map((tag: any) => ({ task_id: data.id, tag_id: tag.id }))
@@ -110,7 +105,7 @@ export function useTasks(campId?: string | null) {
   }
 
   async function updateTask(id: string, updates: Partial<Task>) {
-    const { tags, comments, assignees, ...rest } = updates as any
+    const { tags, ...rest } = updates as any
 
     const { error } = await supabase.from('tasks').update(rest).eq('id', id)
     if (error) {

@@ -9,7 +9,6 @@ import { Plus } from 'lucide-react'
 interface KanbanColumnProps {
   status: TaskStatus
   label: string
-  color: string
   hex: string
   tasks: Task[]
   onTaskClick: (task: Task) => void
@@ -21,7 +20,6 @@ export function KanbanColumn({ status, label, hex, tasks, onTaskClick, onAddTask
 
   return (
     <div className="flex min-w-0 flex-col">
-      {/* ── Column header ─────────────────────────── */}
       <div
         className="flex items-center justify-between mb-2 px-3 py-2.5 rounded-xl"
         style={{
@@ -66,7 +64,6 @@ export function KanbanColumn({ status, label, hex, tasks, onTaskClick, onAddTask
         </button>
       </div>
 
-      {/* ── Drop zone ─────────────────────────────── */}
       <div
         ref={setNodeRef}
         className="min-h-[220px] rounded-xl p-2 space-y-2 transition-all lg:max-h-[calc(100vh-18rem)] lg:overflow-y-auto"
