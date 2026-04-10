@@ -3,11 +3,7 @@ import type { Task, CodeCamp } from '@/types/database'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function getQ2Deadline(from: Date): number {
-  const q2End = new Date(from.getFullYear(), 5, 30) // June 30
-  if (q2End < from) q2End.setFullYear(from.getFullYear() + 1)
-  return Math.ceil((q2End.getTime() - from.getTime()) / (1000 * 60 * 60 * 24))
-}
+const DIV = '――――――――――――――――――――'
 
 function campIcon(camp: CodeCamp, today: Date): string {
   if (camp.status === 'completed') return '✅'
@@ -29,10 +25,12 @@ function formatCampDate(camp: CodeCamp): string {
   })
 }
 
+// Escape HTML special chars so task titles/usernames never break the parser
+const h = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 const PRIORITY_BADGE: Record<string, string> = {
-  urgent: '🔴 URGENT',
-  high:   '🟠 HIGH',
+  urgent: ' 🔴 URGENT',
+  high:   ' 🟠 HIGH',
   medium: '',
   low:    '',
 }
@@ -46,7 +44,7 @@ export async function generateStandupMessage(): Promise<string> {
     supabase
       .from('tasks')
       .select('id, title, status, priority, due_date, assigned_to, camp_id, updated_at')
-      .order('updated_at', { ascending: false }),
+      .order('priority', { ascending: false }),
     supabase
       .from('code_camps')
       .select('*')
@@ -62,70 +60,79 @@ export async function generateStandupMessage(): Promise<string> {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  // assigned_to is a plain text field (telegram_username or telegram_id)
   const tasks = rawTasks.map(t => ({
     ...t,
-    _assigneeNames: t.assigned_to ? [`@${t.assigned_to}`] : [],
+    _assignee: t.assigned_to ? `@${t.assigned_to}` : null,
   }))
-
-  // ── KPI metrics ────────────────────────────────────────────────────────────
-  const completedCamps = allCamps.filter(c => c.status === 'completed').length
-  const totalCamps     = allCamps.length
-  const blockedTasks   = tasks.filter(t => t.status === 'blocked')
-  const urgentActive   = tasks.filter(t => t.priority === 'urgent' && t.status !== 'done')
-  const openRisks      = new Set([...blockedTasks, ...urgentActive].map(t => t.id)).size
-  const daysToQ2       = getQ2Deadline(today)
 
   // ── task buckets ───────────────────────────────────────────────────────────
   const inProgress  = tasks.filter(t => t.status === 'in_progress')
   const inReview    = tasks.filter(t => t.status === 'in_review')
+  const blocked     = tasks.filter(t => t.status === 'blocked')
   const overdue     = tasks.filter(t =>
     t.due_date && new Date(t.due_date) < today && t.status !== 'done'
   )
   const doneTasks   = tasks.filter(t => t.status === 'done')
   const todoTasks   = tasks.filter(t => t.status === 'todo')
+  const activeTasks = tasks.filter(t => t.status !== 'done')
 
   const upcomingCamps = allCamps.filter(c => c.status === 'active' || c.status === 'paused')
+  const completedCamps = allCamps.filter(c => c.status === 'completed').length
 
-  // ── date header ────────────────────────────────────────────────────────────
+  // ── date header ─────────────────────────────────────────────────────────────
   const dateStr = today.toLocaleDateString('en-PH', {
     timeZone: 'Asia/Manila',
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   })
 
-  // ── format a task line (HTML-safe) ────────────────────────────────────────
+  // ── task line formatter ──────────────────────────────────────────────────────
   function taskLine(t: any): string {
-    const badge    = PRIORITY_BADGE[t.priority] ? ` [${PRIORITY_BADGE[t.priority]}]` : ''
-    const assignee = t._assigneeNames.length
-      ? ` · 👤 ${t._assigneeNames.map((n: string) => n.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')).join(', ')}`
-      : ''
+    const title    = h(t.title)
+    const badge    = PRIORITY_BADGE[t.priority] ?? ''
+    const assignee = t._assignee ? ` — ${h(t._assignee)}` : ''
     const due      = t.due_date
-      ? ` · 📅 due ${new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+      ? ` · 📅 ${new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
       : ''
-    const title = t.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    return `• ${title}${badge}${assignee}${due}`
+    return `▸ ${title}${badge}${assignee}${due}`
   }
 
-  // Escape HTML special chars in dynamic content so task titles / usernames
-  // never break Telegram's HTML parser
-  const h = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  // ── section builder ──────────────────────────────────────────────────────────
+  function section(icon: string, label: string, items: any[], limit = 10): string {
+    if (items.length === 0) return ''
+    let s = `\n${DIV}\n`
+    s += `${icon} <b>${label}</b> <i>(${items.length})</i>\n`
+    s += `${DIV}\n`
+    items.slice(0, limit).forEach(t => { s += taskLine(t) + '\n' })
+    if (items.length > limit) s += `<i>  ...and ${items.length - limit} more</i>\n`
+    return s
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   let msg = ''
 
-  // Header
-  msg += `📝 <b>DEVCON OPS — DAILY DSU</b>\n`
-  msg += `${h(dateStr)}\n`
+  // ── Header ────────────────────────────────────────────────────────────────
+  msg += `📋 <b>DEVCON COHORT 4 — Daily Stand Up</b>\n`
+  msg += `<i>${h(dateStr)}</i>\n`
 
-  // KPI Snapshot
-  msg += `\n📊 <b>KPI SNAPSHOT</b>\n`
-  msg += `Code Camps: <b>${completedCamps}/${totalCamps} completed</b>\n`
-  msg += `Days to Q2 deadline: <b>${daysToQ2} days</b>\n`
-  msg += `Open Risks: <b>${openRisks}</b>\n`
+  // ── KPI Snapshot (task-focused) ───────────────────────────────────────────
+  msg += `\n${DIV}\n`
+  msg += `📊 <b>KPI SNAPSHOT</b>\n`
+  msg += `${DIV}\n`
+  msg += `📌 Active Tasks: <b>${activeTasks.length}</b>\n`
+  msg += `✅ Done: <b>${doneTasks.length}</b>\n`
+  msg += `🚧 Blocked: <b>${blocked.length}</b>\n`
+  msg += `⏰ Overdue: <b>${overdue.length}</b>\n`
+  if (allCamps.length > 0) {
+    msg += `🏕️ Camps: <b>${upcomingCamps.length} active</b>`
+    if (completedCamps > 0) msg += `, ${completedCamps} completed`
+    msg += '\n'
+  }
 
-  // Upcoming Camps
+  // ── Upcoming Camps (only if any) ──────────────────────────────────────────
   if (upcomingCamps.length > 0) {
-    msg += `\n📅 <b>UPCOMING CAMPS</b>\n`
+    msg += `\n${DIV}\n`
+    msg += `📅 <b>UPCOMING CAMPS</b>\n`
+    msg += `${DIV}\n`
     upcomingCamps.forEach(camp => {
       const icon = campIcon(camp, today)
       const date = formatCampDate(camp)
@@ -138,66 +145,22 @@ export async function generateStandupMessage(): Promise<string> {
     })
   }
 
-  // In Progress
-  if (inProgress.length > 0) {
-    msg += `\n🔄 <b>IN PROGRESS</b> (${inProgress.length})\n`
-    inProgress.slice(0, 8).forEach(t => { msg += taskLine(t) + '\n' })
-    if (inProgress.length > 8) msg += `<i>...and ${inProgress.length - 8} more</i>\n`
-  }
+  // ── Task Sections (only non-empty ones shown) ─────────────────────────────
+  msg += section('🔄', 'IN PROGRESS', inProgress, 10)
+  msg += section('👀', 'IN REVIEW',   inReview,   8)
+  msg += section('🚧', 'BLOCKED',     blocked,    10)
+  msg += section('⏰', 'OVERDUE',     overdue,    5)
 
-  // In Review
-  if (inReview.length > 0) {
-    msg += `\n👀 <b>IN REVIEW</b> (${inReview.length})\n`
-    inReview.slice(0, 5).forEach(t => { msg += taskLine(t) + '\n' })
-  }
-
-  // Blocked
-  if (blockedTasks.length > 0) {
-    msg += `\n🚧 <b>BLOCKED</b> (${blockedTasks.length})\n`
-    blockedTasks.forEach(t => { msg += taskLine(t) + '\n' })
-  }
-
-  // Overdue
-  if (overdue.length > 0) {
-    msg += `\n⏰ <b>OVERDUE</b> (${overdue.length})\n`
-    overdue.slice(0, 5).forEach(t => { msg += taskLine(t) + '\n' })
-  }
-
-  // Task Summary
-  msg += `\n📋 <b>TASK SUMMARY</b>\n`
-  msg += `✅ Done: ${doneTasks.length}  ·  🔄 In Progress: ${inProgress.length}  ·  👀 In Review: ${inReview.length}  ·  📝 To Do: ${todoTasks.length}  ·  🚧 Blocked: ${blockedTasks.length}\n`
-
-  // Contextual next-action recommendation
-  const firstBlocked    = blockedTasks[0]
-  const firstOverdue    = overdue[0]
-  const firstInProgress = inProgress[0]
-
-  let nextCmd = ''
-  let nextReason = ''
-
-  if (firstBlocked) {
-    const id = (firstBlocked.id as string).slice(0, 6)
-    nextCmd    = `/update ${id} in progress`
-    nextReason = `unblock <b>${h(firstBlocked.title)}</b>`
-  } else if (firstOverdue) {
-    const id = (firstOverdue.id as string).slice(0, 6)
-    nextCmd    = `/done ${id}`
-    nextReason = `close overdue task <b>${h(firstOverdue.title)}</b>`
-  } else if (firstInProgress) {
-    const id = (firstInProgress.id as string).slice(0, 6)
-    nextCmd    = `/done ${id}`
-    nextReason = `finish <b>${h(firstInProgress.title)}</b>`
-  } else if (todoTasks.length > 0) {
-    nextCmd    = `/tasks`
-    nextReason = `pick up one of the ${todoTasks.length} queued tasks`
-  } else {
-    nextCmd    = `/addtask &lt;title&gt;`
-    nextReason = `queue the next item`
-  }
-
-  msg += `\n💡 <b>Suggested next:</b> <code>${nextCmd}</code>\n`
-  msg += `<i>→ ${nextReason}</i>\n`
-  msg += `<i>Send /help for all commands</i>`
+  // ── Task Summary ──────────────────────────────────────────────────────────
+  msg += `\n${DIV}\n`
+  msg += `📋 <b>TASK SUMMARY</b>\n`
+  msg += `${DIV}\n`
+  msg += `✅ Done: ${doneTasks.length}\n`
+  msg += `🔄 In Progress: ${inProgress.length}\n`
+  msg += `👀 In Review: ${inReview.length}\n`
+  msg += `📝 To Do: ${todoTasks.length}\n`
+  msg += `🚧 Blocked: ${blocked.length}\n`
+  msg += `⏰ Overdue: ${overdue.length}`
 
   return msg
 }
