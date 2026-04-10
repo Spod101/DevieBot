@@ -25,6 +25,12 @@ async function reply(text: string) {
   await sendTelegramMessage(text)
 }
 
+// UUID ilike doesn't work in PostgREST — fetch and filter client-side by prefix
+async function findTaskByPrefix(prefix: string, supabase: ReturnType<typeof createServiceClient>) {
+  const { data } = await supabase.from('tasks').select('id, title').limit(500)
+  return (data ?? []).find((t: any) => t.id.startsWith(prefix.toLowerCase())) ?? null
+}
+
 // Auto-register the sender as a member if they're not already in the DB
 async function syncMember(from: {
   id: number
@@ -246,14 +252,13 @@ export async function POST(request: Request) {
           await reply('❌ Provide a task ID.\nExample: `/done a1b2c3`\n\n_Use /tasks to see IDs_')
           return NextResponse.json({ ok: true })
         }
-        const { data: tasks } = await supabase
-          .from('tasks').select('id, title').ilike('id', `${taskId}%`).limit(1)
-        if (!tasks || tasks.length === 0) {
+        const task = await findTaskByPrefix(taskId, supabase)
+        if (!task) {
           await reply(`❌ No task found with ID starting with \`${taskId}\``)
           return NextResponse.json({ ok: true })
         }
-        await supabase.from('tasks').update({ status: 'done' }).eq('id', tasks[0].id)
-        await reply(`✅ *${tasks[0].title}*\nMarked as done! Great work! 🎉`)
+        await supabase.from('tasks').update({ status: 'done' }).eq('id', task.id)
+        await reply(`✅ *${task.title}*\nMarked as done! Great work! 🎉`)
         return NextResponse.json({ ok: true })
       }
 
@@ -278,17 +283,16 @@ export async function POST(request: Request) {
           return NextResponse.json({ ok: true })
         }
 
-        const { data: tasks } = await supabase
-          .from('tasks').select('id, title').ilike('id', `${taskId}%`).limit(1)
-        if (!tasks || tasks.length === 0) {
+        const task = await findTaskByPrefix(taskId, supabase)
+        if (!task) {
           await reply(`❌ No task found with ID starting with \`${taskId}\``)
           return NextResponse.json({ ok: true })
         }
-        await supabase.from('tasks').update({ status: mappedStatus }).eq('id', tasks[0].id)
+        await supabase.from('tasks').update({ status: mappedStatus }).eq('id', task.id)
         const statusEmoji: Record<string, string> = {
           todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
         }
-        await reply(`${statusEmoji[mappedStatus] ?? '📌'} *${tasks[0].title}*\nMoved to: *${mappedStatus.replace(/_/g, ' ')}*`)
+        await reply(`${statusEmoji[mappedStatus] ?? '📌'} *${task.title}*\nMoved to: *${mappedStatus.replace(/_/g, ' ')}*`)
         return NextResponse.json({ ok: true })
       }
 
@@ -430,14 +434,13 @@ export async function POST(request: Request) {
 
       // ── done ──
       if (intent.intent === 'done') {
-        const { data: tasks } = await supabase
-          .from('tasks').select('id, title').ilike('id', `${intent.taskId}%`).limit(1)
-        if (!tasks || tasks.length === 0) {
+        const task = await findTaskByPrefix(intent.taskId, supabase)
+        if (!task) {
           await reply(`❌ No task found with ID starting with \`${intent.taskId}\``)
           return NextResponse.json({ ok: true })
         }
-        await supabase.from('tasks').update({ status: 'done' }).eq('id', tasks[0].id)
-        await reply(`✅ *${tasks[0].title}*\nMarked as done! Great work! 🎉`)
+        await supabase.from('tasks').update({ status: 'done' }).eq('id', task.id)
+        await reply(`✅ *${task.title}*\nMarked as done! Great work! 🎉`)
         return NextResponse.json({ ok: true })
       }
 
@@ -448,17 +451,16 @@ export async function POST(request: Request) {
           await reply(`❌ Unknown status *${intent.status}*\nValid: ${VALID_STATUSES.join(', ')}`)
           return NextResponse.json({ ok: true })
         }
-        const { data: tasks } = await supabase
-          .from('tasks').select('id, title').ilike('id', `${intent.taskId}%`).limit(1)
-        if (!tasks || tasks.length === 0) {
+        const task = await findTaskByPrefix(intent.taskId, supabase)
+        if (!task) {
           await reply(`❌ No task found with ID starting with \`${intent.taskId}\``)
           return NextResponse.json({ ok: true })
         }
-        await supabase.from('tasks').update({ status: mappedStatus }).eq('id', tasks[0].id)
+        await supabase.from('tasks').update({ status: mappedStatus }).eq('id', task.id)
         const statusEmoji: Record<string, string> = {
           todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
         }
-        await reply(`${statusEmoji[mappedStatus] ?? '📌'} *${tasks[0].title}*\nMoved to: *${mappedStatus.replace(/_/g, ' ')}*`)
+        await reply(`${statusEmoji[mappedStatus] ?? '📌'} *${task.title}*\nMoved to: *${mappedStatus.replace(/_/g, ' ')}*`)
         return NextResponse.json({ ok: true })
       }
 
