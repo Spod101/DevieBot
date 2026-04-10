@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import type { TaskStatus } from '@/types/database'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -48,11 +49,28 @@ Example output:
   }
 }
 
+export async function parseStatus(text: string): Promise<TaskStatus | null> {
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 20,
+    system: `Map the following text to exactly one task status enum value.
+Return ONLY one of these exact strings with no quotes and no extra words:
+  todo | in_progress | in_review | blocked | done
+If the text does not clearly indicate a task status, return exactly: null`,
+    messages: [{ role: 'user', content: text }],
+  })
+
+  const raw = (response.content[0] as { type: string; text: string }).text.trim()
+  const VALID: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'blocked', 'done']
+  return VALID.includes(raw as TaskStatus) ? (raw as TaskStatus) : null
+}
+
+// ── ParsedIntent ─────────────────────────────────────────────────────────────
 export type ParsedIntent =
   | { intent: 'addtask'; title: string; priority?: string; campName?: string; assignedTo?: string }
   | { intent: 'addcamp'; campName: string }
-  | { intent: 'update'; taskId: string; status: string }
-  | { intent: 'done'; taskId: string }
+  | { intent: 'update'; taskId: string | null; status: string }
+  | { intent: 'done';   taskId: string | null }
   | { intent: 'standup' }
   | { intent: 'tasks' }
   | { intent: 'camps' }
@@ -69,7 +87,7 @@ export async function parseMessage(
 
   const tasksContext = context.recentTasks.length
     ? `Recent tasks:\n${context.recentTasks
-        .slice(0, 10)
+        .slice(0, 20)
         .map(t => `- [${t.id.slice(0, 6)}] "${t.title}" (${t.status})`)
         .join('\n')}`
     : 'No recent tasks.'
@@ -83,8 +101,8 @@ ${tasksContext}
 Possible intents and their JSON shapes:
 - Add a task: {"intent":"addtask","title":"<task title>","priority":"low|medium|high|urgent","campName":"<camp name or null>","assignedTo":"<username without @ or null>"}
 - Create a camp: {"intent":"addcamp","campName":"<camp name>"}
-- Update task status: {"intent":"update","taskId":"<first 6 chars of id>","status":"todo|in_progress|in_review|blocked|done"}
-- Mark task done: {"intent":"done","taskId":"<first 6 chars of id>"}
+- Update task status: {"intent":"update","taskId":"<first 6 chars of id or null>","status":"todo|in_progress|in_review|blocked|done"}
+- Mark task done: {"intent":"done","taskId":"<first 6 chars of id or null>"}
 - Show standup report: {"intent":"standup"}
 - List all tasks: {"intent":"tasks"}
 - List all camps: {"intent":"camps"}
@@ -97,8 +115,15 @@ Rules:
 - If no priority mentioned, default to "medium"
 - If no camp mentioned, omit campName or set to null
 - If no assignee (@mention) present, omit assignedTo or set to null
-- For status updates, map natural language ("move to review", "mark in progress") to the correct enum value
+- For status updates, map natural language to the correct enum value using these patterns:
+  * "I'm working on X" / "started X" / "picking up X" / "currently on X" / "wip" → in_progress
+  * "reviewing X" / "X is in review" / "up for review" / "submitted for review" / "ready for review" → in_review
+  * "blocked on X" / "stuck on X" / "waiting for X" / "can't proceed" / "held up by X" → blocked
+  * "done with X" / "finished X" / "completed X" / "wrapped up X" / "shipped X" / "delivered X" → done
+  * "haven't started" / "will do X" / "to do" / "planning X" → todo
 - If the user references a task by partial title, find the closest match from recent tasks and use its ID
+- If the intent is clearly a status update but no task title matches recent tasks, still return the update intent with taskId set to null
+- Only use intent:"unknown" for genuine chitchat with zero task/project relevance
 - Always return ONLY raw JSON, no markdown, no explanation`
 
   const response = await client.messages.create({
