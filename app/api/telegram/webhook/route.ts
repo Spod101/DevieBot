@@ -101,20 +101,19 @@ export async function POST(request: Request) {
     // ── /help or /start ───────────────────────────────────────────────
     if (cmd === '/help' || cmd === '/start') {
       await reply(
-        `🤖 *Devie Bot — Commands*\n\n` +
-        `📋 *View*\n` +
+        `🤖 <b>Devie Bot — Commands</b>\n\n` +
+        `📋 <b>View</b>\n` +
         `/tasks — list active tasks\n` +
         `/camps — list code camps\n` +
         `/standup — send standup report\n\n` +
-        `➕ *Create*\n` +
-        `/addtask <title> — add a task\n` +
-        `/addtask <title> --camp <name> — add to a camp\n` +
-        `/addtask <title> --priority high — set priority\n` +
-        `/addcamp <name> — create a new camp\n\n` +
-        `✏️ *Update*\n` +
-        `/done <id> — mark task as done\n` +
-        `/update <id> <status> — update task status\n` +
-        `_Statuses: todo, in_progress, in_review, blocked, done_`
+        `➕ <b>Create</b>\n` +
+        `/addtask &lt;title&gt; — add a task\n` +
+        `/addtask &lt;title&gt; @username — assign to someone\n` +
+        `/addcamp &lt;name&gt; — create a new camp\n\n` +
+        `✏️ <b>Update</b>\n` +
+        `/done &lt;id&gt; — mark task as done\n` +
+        `/update &lt;id&gt; &lt;status&gt; — update task status\n` +
+        `<i>Statuses: todo, in progress, in review, blocked, done</i>`
       )
       return NextResponse.json({ ok: true })
     }
@@ -161,7 +160,7 @@ export async function POST(request: Request) {
 
       if (filtered.length === 0) {
         const who = mentionedUsers.length ? ` for ${mentionedUsers.map(u => `@${u}`).join(', ')}` : ''
-        const where = campFilter ? ` in *${campFilter}*` : ''
+        const where = campFilter ? ` in <b>${campFilter}</b>` : ''
         await reply(`📋 No active tasks${who}${where}.`)
         return NextResponse.json({ ok: true })
       }
@@ -174,7 +173,7 @@ export async function POST(request: Request) {
       // Build header
       const who = mentionedUsers.length ? ` · ${mentionedUsers.map(u => `@${u}`).join(', ')}` : ''
       const where = campFilter ? ` · ${campFilter}` : ''
-      let msg = `📋 *Tasks${who}${where}*\n\n`
+      let msg = `📋 <b>Tasks${who}${where}</b>\n\n`
 
       // Group by status
       const grouped: Record<string, string[]> = {}
@@ -182,7 +181,8 @@ export async function POST(request: Request) {
         if (!grouped[t.status]) grouped[t.status] = []
         const assignee = !mentionedUsers.length && t.assigned_to ? ` · @${t.assigned_to}` : ''
         const camp = !campFilter && t.code_camps?.name ? ` · ${t.code_camps.name}` : ''
-        grouped[t.status].push(`• \`${t.id.slice(0, 6)}\` ${t.title}${assignee}${camp}`)
+        const title = (t.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        grouped[t.status].push(`• <code>${t.id.slice(0, 6)}</code> ${title}${assignee}${camp}`)
       })
 
       Object.entries(grouped).forEach(([status, items]) => {
@@ -190,7 +190,7 @@ export async function POST(request: Request) {
       })
 
       // Usage hint
-      msg += `_Filter: /tasks @name · /tasks --camp Backend · /tasks @dale @kien_`
+      msg += `<i>Filter: /tasks @name · /tasks --camp Backend · /tasks @dale @kien</i>`
 
       await reply(msg)
       return NextResponse.json({ ok: true })
@@ -210,11 +210,12 @@ export async function POST(request: Request) {
         active: '🟢', paused: '🟡', completed: '🔵', archived: '⚫',
       }
 
-      let msg = `🏕️ *Code Camps*\n\n`
+      let msg = `🏕️ <b>Code Camps</b>\n\n`
       camps.forEach((c: any) => {
         const filled = Math.round(c.progress / 10)
         const bar = '█'.repeat(filled) + '░'.repeat(10 - filled)
-        msg += `${emoji[c.status] ?? '⚪'} *${c.name}*\n  ${bar} ${c.progress}%\n\n`
+        const name = (c.name as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        msg += `${emoji[c.status] ?? '⚪'} <b>${name}</b>\n  ${bar} ${c.progress}%\n\n`
       })
       await reply(msg)
       return NextResponse.json({ ok: true })
@@ -225,20 +226,20 @@ export async function POST(request: Request) {
       if (!rest) {
         const examples: Record<string, string> = {
           '/addtask': (
-            `Usage: \`/addtask <title>\` — natural language welcome!\n\n` +
-            `*Examples:*\n` +
+            `Usage: <code>/addtask &lt;title&gt;</code>\n\n` +
+            `<b>Examples:</b>\n` +
             `/addtask fix login bug\n` +
             `/addtask fix login bug, high priority\n` +
-            `/addtask fix login @dale urgent backend camp`
+            `/addtask fix login @dale urgent`
           ),
-          '/addcamp': `Usage: \`/addcamp <name>\`\n\n*Example:*\n/addcamp Backend`,
-          '/done': `Usage: \`/done <task id>\`\n\n*Example:*\n/done a1b2c3\n\n_Use /tasks to see IDs_`,
+          '/addcamp': `Usage: <code>/addcamp &lt;name&gt;</code>\n\n<b>Example:</b>\n/addcamp Backend`,
+          '/done': `Usage: <code>/done &lt;task id&gt;</code>\n\n<b>Example:</b>\n/done a1b2c3\n\n<i>Use /tasks to see IDs</i>`,
           '/update': (
-            `Usage: \`/update <id> <status>\` — natural language welcome!\n\n` +
-            `*Examples:*\n` +
+            `Usage: <code>/update &lt;id&gt; &lt;status&gt;</code>\n\n` +
+            `<b>Examples:</b>\n` +
             `/update a1b2c3 in review\n` +
-            `/update a1b2c3 mark as blocked\n\n` +
-            `_Use /tasks to see IDs_`
+            `/update a1b2c3 blocked\n\n` +
+            `<i>Use /tasks to see IDs</i>`
           ),
         }
         await reply(examples[cmd])
@@ -249,16 +250,17 @@ export async function POST(request: Request) {
       if (cmd === '/done') {
         const taskId = args[0]
         if (!taskId) {
-          await reply('❌ Provide a task ID.\nExample: `/done a1b2c3`\n\n_Use /tasks to see IDs_')
+          await reply('❌ Provide a task ID.\nExample: <code>/done a1b2c3</code>\n\n<i>Use /tasks to see IDs</i>')
           return NextResponse.json({ ok: true })
         }
         const task = await findTaskByPrefix(taskId, supabase)
         if (!task) {
-          await reply(`❌ No task found with ID starting with \`${taskId}\``)
+          await reply(`❌ No task found with ID starting with <code>${taskId}</code>`)
           return NextResponse.json({ ok: true })
         }
         await supabase.from('tasks').update({ status: 'done' }).eq('id', task.id)
-        await reply(`✅ *${task.title}*\nMarked as done! Great work! 🎉`)
+        const doneTitle = (task.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        await reply(`✅ <b>${doneTitle}</b>\nMarked as done! Great work! 🎉`)
         return NextResponse.json({ ok: true })
       }
 
@@ -270,7 +272,7 @@ export async function POST(request: Request) {
           .replace(/[\s-]+/g, '_')
 
         if (!taskId || !statusRaw) {
-          await reply('❌ Usage: `/update <id> <status>`\n\nStatuses: `todo · in_progress · in_review · blocked · done`\n\n_Use /tasks to see IDs_')
+          await reply('❌ Usage: <code>/update &lt;id&gt; &lt;status&gt;</code>\n\nStatuses: todo · in progress · in review · blocked · done\n\n<i>Use /tasks to see IDs</i>')
           return NextResponse.json({ ok: true })
         }
 
@@ -279,20 +281,21 @@ export async function POST(request: Request) {
           ?? (VALID_STATUSES.includes(statusRaw as TaskStatus) ? statusRaw as TaskStatus : null)
 
         if (!mappedStatus) {
-          await reply(`❌ Unknown status *${statusRaw}*\nValid: todo, in_progress, in_review, blocked, done`)
+          await reply(`❌ Unknown status <b>${statusRaw}</b>\nValid: todo, in progress, in review, blocked, done`)
           return NextResponse.json({ ok: true })
         }
 
         const task = await findTaskByPrefix(taskId, supabase)
         if (!task) {
-          await reply(`❌ No task found with ID starting with \`${taskId}\``)
+          await reply(`❌ No task found with ID starting with <code>${taskId}</code>`)
           return NextResponse.json({ ok: true })
         }
         await supabase.from('tasks').update({ status: mappedStatus }).eq('id', task.id)
         const statusEmoji: Record<string, string> = {
           todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
         }
-        await reply(`${statusEmoji[mappedStatus] ?? '📌'} *${task.title}*\nMoved to: *${mappedStatus.replace(/_/g, ' ')}*`)
+        const updTitle = (task.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        await reply(`${statusEmoji[mappedStatus] ?? '📌'} <b>${updTitle}</b>\nMoved to: <b>${mappedStatus.replace(/_/g, ' ')}</b>`)
         return NextResponse.json({ ok: true })
       }
 
@@ -341,7 +344,8 @@ export async function POST(request: Request) {
           if (error || !task) {
             await reply('❌ Failed to create task.')
           } else {
-            await reply(`✅ Task added!\n*${task.title}*\nID: \`${task.id.slice(0, 6)}\` · medium`)
+            const t0 = (task.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            await reply(`✅ Task added!\n<b>${t0}</b>\nID: <code>${task.id.slice(0, 6)}</code> · medium`)
           }
           return NextResponse.json({ ok: true })
         }
@@ -370,7 +374,8 @@ export async function POST(request: Request) {
           if (error || !task) {
             await reply('❌ Failed to create task.')
           } else {
-            await reply(`✅ Task added!\n*${task.title}*\nID: \`${task.id.slice(0, 8)}\` · ${priority} · @${username}`)
+            const t1 = (task.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            await reply(`✅ Task added!\n<b>${t1}</b>\nID: <code>${task.id.slice(0, 8)}</code> · ${priority} · @${username}`)
           }
           return NextResponse.json({ ok: true })
         }
@@ -399,7 +404,7 @@ export async function POST(request: Request) {
           const { data: camps } = await supabase
             .from('code_camps').select('id, name').ilike('name', `%${campName}%`).limit(1)
           if (!camps || camps.length === 0) {
-            await reply(`❌ No camp found matching *"${campName}"*.\nUse /camps to see all camps.`)
+            await reply(`❌ No camp found matching <b>"${campName}"</b>.\nUse /camps to see all camps.`)
             return NextResponse.json({ ok: true })
           }
           campId = camps[0].id
@@ -411,9 +416,10 @@ export async function POST(request: Request) {
         if (error || !task) {
           await reply('❌ Failed to create task.')
         } else {
-          const where = campName ? ` in *${campName}*` : ''
+          const t3 = (task.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          const where = campName ? ` in <b>${campName}</b>` : ''
           const assignee = assignedTo ? ` · @${assignedTo}` : ''
-          await reply(`✅ Task added${where}!\n*${task.title}*\nID: \`${task.id.slice(0, 8)}\` · ${validPriority}${assignee}`)
+          await reply(`✅ Task added${where}!\n<b>${t3}</b>\nID: <code>${task.id.slice(0, 8)}</code> · ${validPriority}${assignee}`)
         }
         return NextResponse.json({ ok: true })
       }
@@ -427,7 +433,8 @@ export async function POST(request: Request) {
         if (error || !camp) {
           await reply('❌ Failed to create camp.')
         } else {
-          await reply(`🏕️ Camp *${camp.name}* created!\nAdd tasks with /addtask <title> ${camp.name} camp`)
+          const cn = (camp.name as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          await reply(`🏕️ Camp <b>${cn}</b> created!\nAdd tasks with /addtask &lt;title&gt; ${cn} camp`)
         }
         return NextResponse.json({ ok: true })
       }
@@ -439,8 +446,9 @@ export async function POST(request: Request) {
           await reply(`❌ No task found with ID starting with \`${intent.taskId}\``)
           return NextResponse.json({ ok: true })
         }
+        const nt = (task.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         await supabase.from('tasks').update({ status: 'done' }).eq('id', task.id)
-        await reply(`✅ *${task.title}*\nMarked as done! Great work! 🎉`)
+        await reply(`✅ <b>${nt}</b>\nMarked as done! Great work! 🎉`)
         return NextResponse.json({ ok: true })
       }
 
@@ -448,19 +456,20 @@ export async function POST(request: Request) {
       if (intent.intent === 'update') {
         const mappedStatus = STATUS_ALIASES[intent.status] ?? (VALID_STATUSES.includes(intent.status as TaskStatus) ? intent.status as TaskStatus : null)
         if (!mappedStatus) {
-          await reply(`❌ Unknown status *${intent.status}*\nValid: ${VALID_STATUSES.join(', ')}`)
+          await reply(`❌ Unknown status <b>${intent.status}</b>\nValid: todo, in progress, in review, blocked, done`)
           return NextResponse.json({ ok: true })
         }
         const task = await findTaskByPrefix(intent.taskId, supabase)
         if (!task) {
-          await reply(`❌ No task found with ID starting with \`${intent.taskId}\``)
+          await reply(`❌ No task found with ID starting with <code>${intent.taskId}</code>`)
           return NextResponse.json({ ok: true })
         }
+        const ut = (task.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         await supabase.from('tasks').update({ status: mappedStatus }).eq('id', task.id)
         const statusEmoji: Record<string, string> = {
           todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
         }
-        await reply(`${statusEmoji[mappedStatus] ?? '📌'} *${task.title}*\nMoved to: *${mappedStatus.replace(/_/g, ' ')}*`)
+        await reply(`${statusEmoji[mappedStatus] ?? '📌'} <b>${ut}</b>\nMoved to: <b>${mappedStatus.replace(/_/g, ' ')}</b>`)
         return NextResponse.json({ ok: true })
       }
 
@@ -504,9 +513,10 @@ export async function POST(request: Request) {
         grouped[key].push(`• ${t.title}`)
       })
 
-      let msg = `✅ *${created.length} task${created.length > 1 ? 's' : ''} created!*\n\n`
+      let msg = `✅ <b>${created.length} task${created.length > 1 ? 's' : ''} created!</b>\n\n`
       Object.entries(grouped).forEach(([assignee, items]) => {
-        msg += `@${assignee}\n${items.join('\n')}\n\n`
+        const safeItems = items.map(i => i.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
+        msg += `@${assignee}\n${safeItems.join('\n')}\n\n`
       })
       await reply(msg.trim())
       return NextResponse.json({ ok: true })
