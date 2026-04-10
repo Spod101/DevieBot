@@ -127,7 +127,7 @@ export default function OverviewPage() {
               className="h-full rounded-full transition-all duration-700"
               style={{
                 width: `${donePercent}%`,
-                background: 'linear-gradient(90deg, var(--primary), #10b981)',
+                background: 'linear-gradient(90deg, var(--primary), var(--devcon-sky))',
               }}
             />
           </div>

@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
@@ -109,25 +110,38 @@ export function Sidebar() {
         className="flex items-center gap-3 px-5 h-16 shrink-0"
         style={{ borderBottom: '1px solid var(--sidebar-border)' }}
       >
-        {/* Lime logo box */}
+        {/* DEVCON 16 logo — icon.png with screen blend so black bg vanishes in dark */}
         <div
-          className="h-8 w-8 rounded-xl flex items-center justify-center shrink-0"
-          style={{ background: 'var(--primary)' }}
+          className="h-10 w-10 rounded-xl overflow-hidden shrink-0 relative"
+          style={{
+            background: 'linear-gradient(135deg, var(--primary) 0%, var(--devcon-sky) 100%)',
+            boxShadow: '0 0 14px color-mix(in srgb, var(--primary) 35%, transparent)',
+          }}
         >
-          <span
-            className="text-black font-bold text-sm"
-            style={{ fontFamily: 'var(--font-jetbrains-mono)', letterSpacing: '-0.02em' }}
-          >
-            D
-          </span>
+          <Image
+            src="/icons/icon.png"
+            alt="DEVCON 16"
+            width={40}
+            height={40}
+            className="w-full h-full object-cover"
+            style={{ mixBlendMode: 'screen', opacity: 0.92 }}
+          />
         </div>
 
-        <span
-          className="font-semibold tracking-tight text-sm text-foreground"
-          style={{ fontFamily: 'var(--font-space-grotesk)' }}
-        >
-          Devie
-        </span>
+        <div className="flex flex-col leading-none">
+          <span
+            className="font-bold tracking-tight text-sm text-foreground"
+            style={{ fontFamily: 'var(--font-space-grotesk)' }}
+          >
+            Devie
+          </span>
+          <span
+            className="text-[9px] font-semibold"
+            style={{ fontFamily: 'var(--font-jetbrains-mono)', color: 'var(--devcon-sky)', letterSpacing: '0.15em' }}
+          >
+            DEVCON 16
+          </span>
+        </div>
 
         {/* System status */}
         <div className="ml-auto mono-tag">
@@ -148,7 +162,7 @@ export function Sidebar() {
                 <div
                   className={cn(
                     'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer',
-                    active ? 'text-black' : 'text-muted-foreground hover:text-foreground'
+                    active ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
                   )}
                   style={active ? {
                     background: 'var(--sidebar-primary)',
@@ -163,7 +177,7 @@ export function Sidebar() {
                 >
                   <Icon className="h-4 w-4 shrink-0" />
                   <span style={{ fontFamily: 'var(--font-space-grotesk)' }}>{label}</span>
-                  {active && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-black/40" />}
+                  {active && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary-foreground/40" />}
                 </div>
               </Link>
             )
@@ -232,7 +246,7 @@ export function Sidebar() {
         className="mx-3 mb-3 rounded-2xl px-4 py-3"
         style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}
       >
-        <div className="mono-tag mb-1.5">
+        <div className="mono-tag mb-1.5" style={{ color: 'var(--muted-foreground)' }}>
           <span className="lime-dot" />
           <span>Manila · PHT</span>
         </div>
@@ -245,15 +259,20 @@ export function Sidebar() {
         </p>
 
         <p
-          className="mt-1.5 text-[10px] text-muted-foreground/60"
+          className="mt-1.5 text-[10px] text-muted-foreground"
           style={{ fontFamily: 'var(--font-jetbrains-mono)', textTransform: 'uppercase', letterSpacing: '0.1em' }}
         >
           {manilaDate}
         </p>
 
         <p
-          className="text-[10px] text-muted-foreground/40"
-          style={{ fontFamily: 'var(--font-jetbrains-mono)', textTransform: 'uppercase', letterSpacing: '0.1em' }}
+          className="text-[10px] font-semibold"
+          style={{
+            fontFamily: 'var(--font-jetbrains-mono)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.1em',
+            color: 'var(--devcon-orange)',
+          }}
         >
           Q2 ends {q2Deadline}
         </p>
@@ -271,9 +290,9 @@ export function Sidebar() {
             color: 'var(--muted-foreground)',
           }}
           onMouseEnter={e => {
-            ;(e.currentTarget as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--lime) 10%, transparent)'
-            ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'color-mix(in srgb, var(--lime) 25%, transparent)'
-            ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--lime)'
+            ;(e.currentTarget as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--devcon-sky) 10%, transparent)'
+            ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'color-mix(in srgb, var(--devcon-sky) 30%, transparent)'
+            ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--devcon-sky)'
           }}
           onMouseLeave={e => {
             ;(e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-bg)'

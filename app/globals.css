@@ -47,140 +47,142 @@
   --radius-3xl: calc(var(--radius) * 2.2);
 }
 
-/* ── Light mode ───────────────────────────────────────────────────────── */
+/* ── Light mode — DEVCON 16 "Pastel Sky" ─────────────────────────────── */
 :root {
   color-scheme: light;
 
   /* Base */
-  --background: #f9fafb;
-  --foreground: #111111;
+  --background: #f5f8ff;
+  --foreground: #1d2e6e;
 
   /* Card */
   --card: #ffffff;
-  --card-foreground: #111111;
+  --card-foreground: #1d2e6e;
 
   /* Popover */
   --popover: #ffffff;
-  --popover-foreground: #111111;
+  --popover-foreground: #1d2e6e;
 
-  /* Primary — Lime (bright enough to read on white) */
-  --primary: #84cc16;
+  /* Primary — soft cornflower blue (not bold indigo) */
+  --primary: #5c7ec8;
   --primary-foreground: #ffffff;
 
   /* Secondary */
-  --secondary: rgba(0, 0, 0, 0.05);
-  --secondary-foreground: #111111;
+  --secondary: rgba(92, 126, 200, 0.08);
+  --secondary-foreground: #1d2e6e;
 
   /* Muted */
-  --muted: rgba(0, 0, 0, 0.04);
-  --muted-foreground: rgba(17, 17, 17, 0.5);
+  --muted: rgba(92, 126, 200, 0.06);
+  --muted-foreground: rgba(29, 46, 110, 0.5);
 
-  /* Accent */
-  --accent: rgba(0, 0, 0, 0.06);
-  --accent-foreground: #111111;
+  /* Accent — pale sky blue */
+  --accent: rgba(125, 185, 240, 0.12);
+  --accent-foreground: #1d2e6e;
 
   /* Destructive */
   --destructive: #dc2626;
 
   /* Border / Input */
-  --border: rgba(0, 0, 0, 0.1);
-  --input: rgba(0, 0, 0, 0.07);
-  --ring: #84cc16;
+  --border: rgba(92, 126, 200, 0.16);
+  --input: rgba(92, 126, 200, 0.08);
+  --ring: #5c7ec8;
 
   /* Radius */
   --radius: 0.75rem;
 
   /* Sidebar */
   --sidebar: #ffffff;
-  --sidebar-foreground: #111111;
-  --sidebar-primary: #84cc16;
-  --sidebar-primary-foreground: #000000;
-  --sidebar-accent: rgba(0, 0, 0, 0.05);
-  --sidebar-accent-foreground: #111111;
-  --sidebar-border: rgba(0, 0, 0, 0.08);
-  --sidebar-ring: #84cc16;
+  --sidebar-foreground: #1d2e6e;
+  --sidebar-primary: #5c7ec8;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(92, 126, 200, 0.08);
+  --sidebar-accent-foreground: #1d2e6e;
+  --sidebar-border: rgba(92, 126, 200, 0.12);
+  --sidebar-ring: #5c7ec8;
 
   /* Charts */
-  --chart-1: #6a9e00;
-  --chart-2: #10b981;
-  --chart-3: rgba(0, 0, 0, 0.4);
-  --chart-4: rgba(0, 0, 0, 0.2);
-  --chart-5: rgba(0, 0, 0, 0.1);
+  --chart-1: #5c7ec8;
+  --chart-2: #7ec8e3;
+  --chart-3: rgba(29, 46, 110, 0.4);
+  --chart-4: rgba(29, 46, 110, 0.2);
+  --chart-5: rgba(29, 46, 110, 0.1);
 
-  /* Custom tokens */
-  --lime: #84cc16;
-  --emerald: #10b981;
-  --obsidian: #f9fafb;
-  --glass-bg: rgba(0, 0, 0, 0.03);
-  --glass-border: rgba(0, 0, 0, 0.09);
+  /* Custom design tokens */
+  --lime: #5c7ec8;          /* alias — maps to pastel blue */
+  --devcon-sky: #7ec8e3;    /* light sky accent */
+  --devcon-orange: #f97316;
+  --obsidian: #f5f8ff;
+  --glass-bg: rgba(125, 200, 227, 0.08);
+  --glass-border: rgba(125, 200, 227, 0.22);
 }
 
-/* ── Dark mode — Obsidian & Lime ─────────────────────────────────────── */
+/* ── Dark mode — DEVCON 16 "Deep Space Navy" ─────────────────────────── */
 .dark {
   color-scheme: dark;
 
   /* Base */
-  --background: #0a0a0a;
-  --foreground: #ebebeb;
+  --background: #05091a;
+  --foreground: #d8e8ff;
 
   /* Card — glassmorphism base */
-  --card: #111111;
-  --card-foreground: #ebebeb;
+  --card: #0b1328;
+  --card-foreground: #d8e8ff;
 
   /* Popover */
-  --popover: #0f0f0f;
-  --popover-foreground: #ebebeb;
+  --popover: #0a1128;
+  --popover-foreground: #d8e8ff;
 
-  /* Primary — Neon Lime */
-  --primary: #ccff00;
-  --primary-foreground: #000000;
+  /* Primary — light sky blue (not bold, airy) */
+  --primary: #90c2f9;
+  --primary-foreground: #011336;
 
   /* Secondary */
-  --secondary: rgba(255, 255, 255, 0.06);
-  --secondary-foreground: #ebebeb;
+  --secondary: rgba(144, 194, 249, 0.08);
+  --secondary-foreground: #d8e8ff;
 
   /* Muted */
-  --muted: rgba(255, 255, 255, 0.05);
-  --muted-foreground: rgba(235, 235, 235, 0.45);
+  --muted: rgba(144, 194, 249, 0.05);
+  --muted-foreground: rgba(216, 232, 255, 0.45);
 
   /* Accent */
-  --accent: rgba(255, 255, 255, 0.08);
-  --accent-foreground: #ebebeb;
+  --accent: rgba(144, 194, 249, 0.1);
+  --accent-foreground: #d8e8ff;
 
   /* Destructive */
-  --destructive: #ff4444;
+  --destructive: #ff5252;
 
   /* Border / Input */
-  --border: rgba(255, 255, 255, 0.1);
-  --input: rgba(255, 255, 255, 0.08);
-  --ring: #ccff00;
+  --border: rgba(144, 194, 249, 0.14);
+  --input: rgba(144, 194, 249, 0.08);
+  --ring: #90c2f9;
 
   /* Radius */
   --radius: 0.75rem;
 
   /* Sidebar */
-  --sidebar: #0c0c0c;
-  --sidebar-foreground: #ebebeb;
-  --sidebar-primary: #ccff00;
-  --sidebar-primary-foreground: #000000;
-  --sidebar-accent: rgba(255, 255, 255, 0.06);
-  --sidebar-accent-foreground: #ebebeb;
-  --sidebar-border: rgba(255, 255, 255, 0.08);
-  --sidebar-ring: #ccff00;
+  --sidebar: #060a1c;
+  --sidebar-foreground: #d8e8ff;
+  --sidebar-primary: #90c2f9;
+  --sidebar-primary-foreground: #011336;
+  --sidebar-accent: rgba(144, 194, 249, 0.08);
+  --sidebar-accent-foreground: #d8e8ff;
+  --sidebar-border: rgba(144, 194, 249, 0.1);
+  --sidebar-ring: #90c2f9;
 
   /* Charts */
-  --chart-1: #ccff00;
-  --chart-2: #10b981;
-  --chart-3: rgba(255, 255, 255, 0.4);
-  --chart-4: rgba(255, 255, 255, 0.2);
-  --chart-5: rgba(255, 255, 255, 0.1);
+  --chart-1: #90c2f9;
+  --chart-2: #a5b4fc;
+  --chart-3: rgba(216, 232, 255, 0.4);
+  --chart-4: rgba(216, 232, 255, 0.2);
+  --chart-5: rgba(216, 232, 255, 0.1);
 
   /* Custom design tokens */
-  --lime: #ccff00;
-  --emerald: #10b981;
-  --obsidian: #0c0c0c;
-  --glass-bg: rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(255, 255, 255, 0.1);
+  --lime: #90c2f9;          /* alias — maps to light sky blue */
+  --devcon-sky: #7dd3fc;    /* slightly more vivid sky accent */
+  --devcon-orange: #fb923c;
+  --obsidian: #05091a;
+  --glass-bg: rgba(144, 194, 249, 0.04);
+  --glass-border: rgba(144, 194, 249, 0.14);
 }
 
 /* ── Base ──────────────────────────────────────────────────────────────── */
@@ -206,61 +208,91 @@
 
 /* ── Glass panel utility ──────────────────────────────────────────────── */
 @layer utilities {
-  /* Light mode glass */
+  /* Light mode glass — soft sky blue tint */
   .glass-panel {
-    background: rgba(0, 0, 0, 0.03);
+    background: rgba(125, 200, 227, 0.08);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(125, 200, 227, 0.22);
   }
-  /* Dark mode glass */
+  /* Dark mode glass — deep navy blue tint */
   .dark .glass-panel {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(144, 194, 249, 0.04);
+    border: 1px solid rgba(144, 194, 249, 0.14);
   }
 
   .glass-panel-strong {
-    background: rgba(0, 0, 0, 0.05);
+    background: rgba(125, 200, 227, 0.12);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(125, 200, 227, 0.28);
   }
   .dark .glass-panel-strong {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(144, 194, 249, 0.07);
+    border: 1px solid rgba(144, 194, 249, 0.18);
   }
 
-  /* 60×60px grid pattern */
+  /* Dot pattern (matches DEVCON 16 slide background) */
   .grid-pattern {
-    background-image:
-      linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
-    background-size: 60px 60px;
+    background-image: radial-gradient(circle, rgba(92, 126, 200, 0.1) 1px, transparent 1px);
+    background-size: 24px 24px;
   }
   .dark .grid-pattern {
-    background-image:
-      linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-image: radial-gradient(circle, rgba(144, 194, 249, 0.07) 1px, transparent 1px);
+    background-size: 24px 24px;
   }
 
-  /* Neon lime glow sphere */
+  /* Pastel sky blue glow (primary ambient) */
   .glow-lime {
-    background: radial-gradient(circle, rgba(106, 158, 0, 0.08) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(125, 200, 227, 0.2) 0%, transparent 70%);
     filter: blur(80px);
     pointer-events: none;
   }
   .dark .glow-lime {
-    background: radial-gradient(circle, rgba(204, 255, 0, 0.12) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(144, 194, 249, 0.16) 0%, transparent 70%);
   }
 
-  /* Emerald glow sphere */
+  /* Violet/periwinkle glow (secondary ambient) */
   .glow-emerald {
-    background: radial-gradient(circle, rgba(16, 185, 129, 0.06) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(92, 126, 200, 0.12) 0%, transparent 70%);
     filter: blur(80px);
     pointer-events: none;
   }
   .dark .glow-emerald {
-    background: radial-gradient(circle, rgba(16, 185, 129, 0.1) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(165, 180, 252, 0.1) 0%, transparent 70%);
+  }
+
+  /* ── DEVCON decorative image blend helpers ─────────────────────────── */
+  /* Clouds (black background PNG) — subtle blur on light, vivid on dark */
+  .deco-cloud {
+    opacity: 0.13;
+    filter: blur(3px);
+  }
+  .dark .deco-cloud {
+    opacity: 0.35;
+    filter: none;
+    mix-blend-mode: screen;
+  }
+
+  /* Smaller secondary cloud */
+  .deco-cloud-sm {
+    opacity: 0.08;
+    filter: blur(4px);
+  }
+  .dark .deco-cloud-sm {
+    opacity: 0.22;
+    filter: none;
+    mix-blend-mode: screen;
+  }
+
+  /* Plane (white background PNG) — multiply removes white on light */
+  .deco-plane {
+    opacity: 0.28;
+    mix-blend-mode: multiply;
+  }
+  .dark .deco-plane {
+    opacity: 0.5;
+    mix-blend-mode: screen;
   }
 
   /* Float animation */
@@ -268,18 +300,18 @@
     animation: float 6s ease-in-out infinite;
   }
 
-  /* Neon pulse button — uses CSS var so it adapts to theme */
+  /* Primary action button — adapts to theme */
   .btn-lime {
-    background-color: var(--lime);
-    color: #000000;
+    background-color: var(--primary);
+    color: var(--primary-foreground);
     font-weight: 700;
     border-radius: 9999px;
-    box-shadow: 0 0 24px color-mix(in srgb, var(--lime) 30%, transparent);
+    box-shadow: 0 0 24px color-mix(in srgb, var(--primary) 35%, transparent);
     transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s;
   }
   .btn-lime:hover {
     transform: scale(1.05);
-    box-shadow: 0 0 40px color-mix(in srgb, var(--lime) 45%, transparent);
+    box-shadow: 0 0 40px color-mix(in srgb, var(--primary) 50%, transparent);
   }
 
   /* System status mono tag */
@@ -291,29 +323,30 @@
     text-transform: uppercase;
     letter-spacing: 0.2em;
     font-size: 9px;
-    color: rgba(17, 17, 17, 0.4);
+    color: rgba(26, 16, 64, 0.4);
   }
   .dark .mono-tag {
-    color: rgba(235, 235, 235, 0.4);
+    color: rgba(220, 232, 255, 0.4);
   }
 
+  /* Pulsing primary dot */
   .lime-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background-color: var(--lime);
+    background-color: var(--devcon-sky);
     animation: pulse-dot 2s ease-in-out infinite;
     flex-shrink: 0;
   }
 
-  /* Lime accent text */
+  /* Primary accent text */
   .text-lime {
-    color: var(--lime);
+    color: var(--primary);
   }
 
-  /* Lime active ring */
+  /* Primary ring */
   .ring-lime {
-    --tw-ring-color: color-mix(in srgb, var(--lime) 30%, transparent);
+    --tw-ring-color: color-mix(in srgb, var(--primary) 30%, transparent);
   }
 
   /* Scrollbar styling */
@@ -324,14 +357,14 @@
     background: transparent;
   }
   .styled-scroll::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.1);
+    background: rgba(79, 70, 229, 0.12);
     border-radius: 99px;
   }
   .dark .styled-scroll::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(96, 165, 250, 0.12);
   }
   .styled-scroll::-webkit-scrollbar-thumb:hover {
-    background: color-mix(in srgb, var(--lime) 35%, transparent);
+    background: color-mix(in srgb, var(--primary) 40%, transparent);
   }
 }
 
@@ -342,8 +375,8 @@
 }
 
 @keyframes pulse-dot {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(204, 255, 0, 0.4); }
-  50%       { opacity: 0.7; box-shadow: 0 0 0 4px rgba(204, 255, 0, 0); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(125, 200, 227, 0.6); }
+  50%       { opacity: 0.7; box-shadow: 0 0 0 4px rgba(125, 200, 227, 0); }
 }
 
 @keyframes shimmer {

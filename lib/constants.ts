@@ -9,7 +9,7 @@ export const TASK_STATUSES: { value: TaskStatus; label: string; color: string; h
 ]
 
 export const TASK_PRIORITIES: { value: TaskPriority; label: string; color: string; badge: string; hex: string }[] = [
-  { value: 'low',    label: 'Low',    color: 'text-slate-400', badge: 'border-white/10 text-white/40 bg-white/5',                       hex: 'rgba(255,255,255,0.4)'  },
+  { value: 'low',    label: 'Low',    color: 'text-slate-400', badge: 'border-border text-muted-foreground bg-muted',                    hex: 'rgba(148,163,184,0.5)'  },
   { value: 'medium', label: 'Medium', color: 'text-blue-400',  badge: 'border-blue-500/20 text-blue-400 bg-blue-500/10',                 hex: '#60a5fa'                 },
   { value: 'high',   label: 'High',   color: 'text-orange-400',badge: 'border-orange-500/20 text-orange-400 bg-orange-500/10',           hex: '#f97316'                 },
   { value: 'urgent', label: 'Urgent', color: 'text-red-400',   badge: 'border-red-500/20 text-red-400 bg-red-500/10',                    hex: '#ff4444'                 },

@@ -54,6 +54,45 @@ async function resolveName(username: string, supabase: ReturnType<typeof createS
   return data?.name ?? data?.telegram_username ?? username
 }
 
+// Detect a member name embedded at the end of a task title (no @ used).
+// Tries the last 2 words as a full name first, then the last single word as
+// a first-name match (exact or "FirstName LastName" prefix).
+// Returns the stripped title + resolved assignee, or the original text + null.
+async function resolveAssigneeByName(
+  text: string,
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<{ title: string; assignee: string | null }> {
+  const words = text.trim().split(/\s+/)
+  // Need at least 2 words so stripping a name still leaves a non-empty title
+  if (words.length < 2) return { title: text.trim(), assignee: null }
+
+  // ── Try last 2 words as a full name (e.g. "Juan dela Cruz") ──────────
+  if (words.length >= 3) {
+    const candidate = words.slice(-2).join(' ')
+    const { data } = await supabase
+      .from('members').select('name').ilike('name', candidate).maybeSingle()
+    if (data?.name) {
+      return { title: words.slice(0, -2).join(' ').trim(), assignee: data.name }
+    }
+  }
+
+  // ── Try last word as a first name (exact) ────────────────────────────
+  const lastWord = words[words.length - 1]
+  const remainingTitle = words.slice(0, -1).join(' ').trim()
+  if (!remainingTitle) return { title: text.trim(), assignee: null }
+
+  const { data: exact } = await supabase
+    .from('members').select('name').ilike('name', lastWord).maybeSingle()
+  if (exact?.name) return { title: remainingTitle, assignee: exact.name }
+
+  // ── Try last word as first name with a last name stored ("David Reyes") ─
+  const { data: prefix } = await supabase
+    .from('members').select('name').ilike('name', `${lastWord} %`).limit(1).maybeSingle()
+  if (prefix?.name) return { title: remainingTitle, assignee: prefix.name }
+
+  return { title: text.trim(), assignee: null }
+}
+
 // Auto-register (or update) a member from their Telegram profile
 async function syncMember(from: {
   id: number
@@ -384,18 +423,24 @@ export async function POST(request: Request) {
           return NextResponse.json({ ok: true })
         }
 
-        // Simple title (no flags, no @, no commas) → skip NLP entirely
+        // Simple title (no flags, no @, no commas) → check trailing name then insert
         const isSimple = !rawRest.includes('--') && mentionsInRest.length === 0 && !rawRest.includes(',')
         if (isSimple) {
+          // Try to detect a member name at the end of the title (e.g. "Fix bug David")
+          const { title: parsedTitle, assignee } = await resolveAssigneeByName(rest, supabase)
+          const finalTitle  = parsedTitle || rest
           const { data: task, error } = await supabase
             .from('tasks')
-            .insert({ title: rest, status: 'todo', priority: 'medium', order_index: 0 })
+            .insert({ title: finalTitle, status: 'todo', priority: 'medium', order_index: 0, assigned_to: assignee })
             .select().single()
           if (error || !task) {
             await reply('❌ Failed to create task.')
           } else {
             const t0 = (task.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            await reply(`✅ Task added!\n<b>${t0}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 6)}</code> · medium`)
+            const assigneeLine = assignee
+              ? ` · ${(assignee as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}`
+              : ''
+            await reply(`✅ Task added!\n<b>${t0}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 6)}</code> · medium${assigneeLine}`)
           }
           return NextResponse.json({ ok: true })
         }
