@@ -45,7 +45,7 @@ export async function generateStandupMessage(): Promise<string> {
   const [tasksRes, campsRes] = await Promise.all([
     supabase
       .from('tasks')
-      .select('*, assignees:task_assignments(member:members(name))')
+      .select('id, title, status, priority, due_date, assigned_to, camp_id, updated_at')
       .order('updated_at', { ascending: false }),
     supabase
       .from('code_camps')
