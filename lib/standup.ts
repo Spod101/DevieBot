@@ -163,7 +163,14 @@ export async function generateStandupMessage(): Promise<string> {
 
 // ─── send helpers ────────────────────────────────────────────────────────────
 
-export async function sendTelegramMessage(text: string): Promise<{ ok: boolean; error?: string }> {
+export interface SendOptions {
+  replyToMessageId?: number   // thread reply to the triggering message
+}
+
+export async function sendTelegramMessage(
+  text: string,
+  options: SendOptions = {}
+): Promise<{ ok: boolean; error?: string }> {
   const token  = process.env.TELEGRAM_BOT_TOKEN
   const chatId = process.env.TELEGRAM_CHAT_ID
 
@@ -176,17 +183,33 @@ export async function sendTelegramMessage(text: string): Promise<{ ok: boolean; 
       .single()
     if (!data?.bot_token || !data?.chat_id)
       return { ok: false, error: 'Telegram not configured' }
-    return sendMessage(data.bot_token, data.chat_id, text)
+    return sendMessage(data.bot_token, data.chat_id, text, options)
   }
 
-  return sendMessage(token, chatId, text)
+  return sendMessage(token, chatId, text, options)
 }
 
-async function sendMessage(token: string, chatId: string, text: string) {
+async function sendMessage(
+  token: string,
+  chatId: string,
+  text: string,
+  options: SendOptions = {}
+) {
+  const payload: Record<string, unknown> = {
+    chat_id:    chatId,
+    text,
+    parse_mode: 'HTML',
+    // If the original message was deleted, still send (just without the thread)
+    allow_sending_without_reply: true,
+  }
+  if (options.replyToMessageId) {
+    payload.reply_to_message_id = options.replyToMessageId
+  }
+
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+    body:    JSON.stringify(payload),
   })
   const data = await res.json()
   if (!data.ok) return { ok: false, error: data.description }

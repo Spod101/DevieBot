@@ -21,9 +21,9 @@ const STATUS_ALIASES: Record<string, TaskStatus> = {
 }
 
 
-async function reply(text: string) {
-  await sendTelegramMessage(text)
-}
+// reply() is intentionally NOT defined here — it is created as a closure
+// inside each POST invocation so it captures that request's message_id.
+// This prevents crosstalk between concurrent requests.
 
 // UUID ilike doesn't work in PostgREST — fetch and filter client-side by prefix
 async function findTaskByPrefix(prefix: string, supabase: ReturnType<typeof createServiceClient>) {
@@ -84,7 +84,18 @@ export async function POST(request: Request) {
     const message = body?.message
     if (!message?.text) return NextResponse.json({ ok: true })
 
-    const text = (message.text as string).trim()
+    const text      = (message.text as string).trim()
+    const messageId = message.message_id as number   // unique per message in this chat
+    const senderId  = message.from?.id as number     // unique per user
+
+    // ── Per-request reply closure ─────────────────────────────────────────
+    // Captures messageId so every response is threaded to the exact message
+    // that triggered it. Concurrent requests each get their own closure —
+    // no shared state, no crosstalk between Person 1 and Person 2.
+    const reply = (text: string) =>
+      sendTelegramMessage(text, { replyToMessageId: messageId })
+
+    console.log(`[webhook] msg=${messageId} from=${senderId} cmd="${text.split(' ')[0]}"`)
 
     // Auto-register sender as a member
     if (message.from && !message.from.is_bot) {
@@ -121,7 +132,7 @@ export async function POST(request: Request) {
     // ── /standup ──────────────────────────────────────────────────────
     if (cmd === '/standup') {
       const msg = await generateStandupMessage()
-      await sendTelegramMessage(msg)
+      await sendTelegramMessage(msg, { replyToMessageId: messageId })
       return NextResponse.json({ ok: true })
     }
 
