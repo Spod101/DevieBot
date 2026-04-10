@@ -3,7 +3,7 @@ import type { Task, CodeCamp } from '@/types/database'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-const DIV = '――――――――――――――――――――'
+const DIV = '─────────────────────'
 
 function campIcon(camp: CodeCamp, today: Date): string {
   if (camp.status === 'completed') return '✅'
@@ -99,11 +99,10 @@ export async function generateStandupMessage(): Promise<string> {
   // ── section builder ──────────────────────────────────────────────────────────
   function section(icon: string, label: string, items: any[], limit = 10): string {
     if (items.length === 0) return ''
-    let s = `\n${DIV}\n`
-    s += `${icon} <b>${label}</b> <i>(${items.length})</i>\n`
+    let s = `\n\n${icon} <b>${label}</b> <i>(${items.length})</i>\n`
     s += `${DIV}\n`
     items.slice(0, limit).forEach(t => { s += taskLine(t) + '\n' })
-    if (items.length > limit) s += `<i>  ...and ${items.length - limit} more</i>\n`
+    if (items.length > limit) s += `<i>...and ${items.length - limit} more</i>\n`
     return s
   }
 
@@ -115,8 +114,7 @@ export async function generateStandupMessage(): Promise<string> {
   msg += `<i>${h(dateStr)}</i>\n`
 
   // ── KPI Snapshot (task-focused) ───────────────────────────────────────────
-  msg += `\n${DIV}\n`
-  msg += `📊 <b>KPI SNAPSHOT</b>\n`
+  msg += `\n📊 <b>KPI SNAPSHOT</b>\n`
   msg += `${DIV}\n`
   msg += `📌 Active Tasks: <b>${activeTasks.length}</b>\n`
   msg += `✅ Done: <b>${doneTasks.length}</b>\n`
@@ -130,8 +128,7 @@ export async function generateStandupMessage(): Promise<string> {
 
   // ── Upcoming Camps (only if any) ──────────────────────────────────────────
   if (upcomingCamps.length > 0) {
-    msg += `\n${DIV}\n`
-    msg += `📅 <b>UPCOMING CAMPS</b>\n`
+    msg += `\n\n📅 <b>UPCOMING CAMPS</b>\n`
     msg += `${DIV}\n`
     upcomingCamps.forEach(camp => {
       const icon = campIcon(camp, today)
@@ -152,8 +149,7 @@ export async function generateStandupMessage(): Promise<string> {
   msg += section('⏰', 'OVERDUE',     overdue,    5)
 
   // ── Task Summary ──────────────────────────────────────────────────────────
-  msg += `\n${DIV}\n`
-  msg += `📋 <b>TASK SUMMARY</b>\n`
+  msg += `\n\n📋 <b>TASK SUMMARY</b>\n`
   msg += `${DIV}\n`
   msg += `✅ Done: ${doneTasks.length}\n`
   msg += `🔄 In Progress: ${inProgress.length}\n`
