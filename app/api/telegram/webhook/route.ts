@@ -31,7 +31,18 @@ async function findTaskByPrefix(prefix: string, supabase: ReturnType<typeof crea
   return (data ?? []).find((t: any) => t.id.startsWith(prefix.toLowerCase())) ?? null
 }
 
-// Auto-register the sender as a member if they're not already in the DB
+// Resolve a @username to the member's display name (stored in assigned_to)
+// Falls back to the raw username if no member found
+async function resolveName(username: string, supabase: ReturnType<typeof createServiceClient>): Promise<string> {
+  const { data } = await supabase
+    .from('members')
+    .select('name, telegram_username, telegram_id')
+    .ilike('telegram_username', username)
+    .maybeSingle()
+  return data?.name ?? data?.telegram_username ?? username
+}
+
+// Auto-register (or update) a member from their Telegram profile
 async function syncMember(from: {
   id: number
   first_name: string
@@ -40,25 +51,34 @@ async function syncMember(from: {
 }, supabase: ReturnType<typeof createServiceClient>) {
   try {
     const telegramId = String(from.id)
+    const name = [from.first_name, from.last_name].filter(Boolean).join(' ').trim() || null
+    const username = from.username ?? null
 
-    // Check if already registered
     const { data: existing } = await supabase
       .from('members')
       .select('id')
       .eq('telegram_id', telegramId)
       .maybeSingle()
 
-    if (existing) return // already in DB, nothing to do
+    if (existing) {
+      // Update name/username in case they changed their Telegram profile
+      await supabase
+        .from('members')
+        .update({ name, telegram_username: username })
+        .eq('telegram_id', telegramId)
+      return
+    }
 
     const { error } = await supabase.from('members').insert({
       telegram_id: telegramId,
-      telegram_username: from.username ?? null,
+      telegram_username: username,
+      name,
     })
 
     if (error) {
       console.error('[syncMember] insert failed:', error.message, error.details)
     } else {
-      console.log(`[syncMember] registered new member tg:${telegramId} @${from.username ?? 'no-username'}`)
+      console.log(`[syncMember] registered ${name ?? username ?? telegramId}`)
     }
   } catch (err: any) {
     console.error('[syncMember] unexpected error:', err?.message ?? err)
@@ -146,6 +166,9 @@ export async function POST(request: Request) {
         // Show usage hint alongside results only if no filters
       }
 
+      // Resolve @mentions to member names (how assigned_to is now stored)
+      const resolvedNames = await Promise.all(mentionedUsers.map(u => resolveName(u, supabase)))
+
       let query = supabase
         .from('tasks')
         .select('id, title, status, priority, assigned_to, camp_id, code_camps(name)')
@@ -153,15 +176,16 @@ export async function POST(request: Request) {
         .order('status')
         .limit(50)
 
-      if (mentionedUsers.length === 1) {
-        query = query.ilike('assigned_to', mentionedUsers[0])
-      } else if (mentionedUsers.length > 1) {
-        query = query.in('assigned_to', mentionedUsers)
+      // Filter by resolved name or fall back to raw username
+      if (resolvedNames.length === 1) {
+        query = query.ilike('assigned_to', resolvedNames[0])
+      } else if (resolvedNames.length > 1) {
+        query = query.in('assigned_to', resolvedNames)
       }
 
       const { data: tasks } = await query
 
-      // Filter by camp client-side (camp name lookup)
+      // Filter by camp client-side
       let filtered = tasks ?? []
       if (campFilter) {
         filtered = filtered.filter((t: any) =>
@@ -170,7 +194,7 @@ export async function POST(request: Request) {
       }
 
       if (filtered.length === 0) {
-        const who = mentionedUsers.length ? ` for ${mentionedUsers.map(u => `@${u}`).join(', ')}` : ''
+        const who = resolvedNames.length ? ` for ${resolvedNames.join(', ')}` : ''
         const where = campFilter ? ` in <b>${campFilter}</b>` : ''
         await reply(`📋 No active tasks${who}${where}.`)
         return NextResponse.json({ ok: true })
@@ -181,8 +205,8 @@ export async function POST(request: Request) {
         in_review: '👀 In Review', blocked: '🚧 Blocked',
       }
 
-      // Build header
-      const who = mentionedUsers.length ? ` · ${mentionedUsers.map(u => `@${u}`).join(', ')}` : ''
+      // Build header — show resolved names not raw @usernames
+      const who = resolvedNames.length ? ` · ${resolvedNames.join(', ')}` : ''
       const where = campFilter ? ` · ${campFilter}` : ''
       let msg = `📋 <b>Tasks${who}${where}</b>\n\n`
 
@@ -190,7 +214,10 @@ export async function POST(request: Request) {
       const grouped: Record<string, string[]> = {}
       filtered.forEach((t: any) => {
         if (!grouped[t.status]) grouped[t.status] = []
-        const assignee = !mentionedUsers.length && t.assigned_to ? ` · @${t.assigned_to}` : ''
+        // Show assignee name when listing all tasks (not filtered by a specific person)
+        const assignee = !resolvedNames.length && t.assigned_to
+          ? ` — ${(t.assigned_to as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}`
+          : ''
         const camp = !campFilter && t.code_camps?.name ? ` · ${t.code_camps.name}` : ''
         const title = (t.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         grouped[t.status].push(`• <code>${t.id.slice(0, 6)}</code> ${title}${assignee}${camp}`)
@@ -200,8 +227,7 @@ export async function POST(request: Request) {
         msg += `${labels[status] || status}\n${items.join('\n')}\n\n`
       })
 
-      // Usage hint
-      msg += `<i>Filter: /tasks @name · /tasks --camp Backend · /tasks @dale @kien</i>`
+      msg += `<i>Filter: /tasks @name · /tasks --camp Backend</i>`
 
       await reply(msg)
       return NextResponse.json({ ok: true })
@@ -365,6 +391,8 @@ export async function POST(request: Request) {
         const hasSingleMention = mentionsInRest.length === 1 && !rawRest.includes('--') && !rawRest.includes(',')
         if (hasSingleMention) {
           const username = mentionsInRest[0][1].toLowerCase()
+          // Resolve @username → member name (the canonical assigned_to value)
+          const assignedName = await resolveName(username, supabase)
           // Strip the @mention from the raw text to get the title
           let titleRaw = rawRest.replace(/@\w+/g, '').replace(/\s+/g, ' ').trim()
           // Extract optional priority keyword
@@ -380,13 +408,14 @@ export async function POST(request: Request) {
           }
           const { data: task, error } = await supabase
             .from('tasks')
-            .insert({ title: titleRaw, status: 'todo', priority, order_index: 0, assigned_to: username })
+            .insert({ title: titleRaw, status: 'todo', priority, order_index: 0, assigned_to: assignedName })
             .select().single()
           if (error || !task) {
             await reply('❌ Failed to create task.')
           } else {
             const t1 = (task.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            await reply(`✅ Task added!\n<b>${t1}</b>\nID: <code>${task.id.slice(0, 8)}</code> · ${priority} · @${username}`)
+            const nameDisplay = (assignedName as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            await reply(`✅ Task added!\n<b>${t1}</b>\nID: <code>${task.id.slice(0, 8)}</code> · ${priority} · ${nameDisplay}`)
           }
           return NextResponse.json({ ok: true })
         }

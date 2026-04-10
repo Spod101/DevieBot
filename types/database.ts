@@ -13,6 +13,7 @@ export interface Member {
   id: number               // serial integer
   telegram_id: string | null
   telegram_username: string | null
+  name: string | null      // first_name + last_name from Telegram (always available)
   created_at: string
 }
 

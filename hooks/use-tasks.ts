@@ -32,11 +32,20 @@ export function useTasks(campId?: string | null) {
       return
     }
 
-    // ── 2. Members — case-insensitive lookup by username and telegram_id ─
+    // ── 2. Members — lookup by name, first name, username, or telegram_id ─
     const { data: members } = await supabase.from('members').select('*')
-    const byUsername: Record<string, Member> = {}
+    const byName: Record<string, Member>       = {}
+    const byUsername: Record<string, Member>   = {}
     const byTelegramId: Record<string, Member> = {}
     ;(members || []).forEach((m: Member) => {
+      if (m.name) {
+        byName[m.name.toLowerCase()] = m
+        // Also index first name so "John" matches "John Doe"
+        const firstName = m.name.split(' ')[0]
+        if (firstName && !byName[firstName.toLowerCase()]) {
+          byName[firstName.toLowerCase()] = m
+        }
+      }
       if (m.telegram_username) byUsername[m.telegram_username.toLowerCase()] = m
       if (m.telegram_id)       byTelegramId[m.telegram_id] = m
     })
@@ -44,8 +53,9 @@ export function useTasks(campId?: string | null) {
     // ── 3. Normalise ─────────────────────────────────────────────────
     const normalized: Task[] = (tasksData || []).map((t: any) => {
       const assignedTo: string | null = t.assigned_to ?? null
+      const key = assignedTo?.toLowerCase() ?? ''
       const member = assignedTo
-        ? (byUsername[assignedTo.toLowerCase()] ?? byTelegramId[assignedTo] ?? null)
+        ? (byName[key] ?? byUsername[key] ?? byTelegramId[assignedTo] ?? null)
         : null
 
       return {

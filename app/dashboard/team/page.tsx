@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useMembers } from '@/hooks/use-members'
-import { memberColor, memberLabel } from '@/lib/member-utils'
+import { memberColor, memberLabel, memberInitials } from '@/lib/member-utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2, Trash2, UserCircle2, MessageCircle } from 'lucide-react'
@@ -58,13 +58,19 @@ export default function TeamPage() {
                     className="h-10 w-10 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0"
                     style={{ backgroundColor: color }}
                   >
-                    {(member.telegram_username?.[0] ?? member.telegram_id?.[0] ?? '?').toUpperCase()}
+                    {memberInitials(member)}
                   </div>
 
                   {/* Info */}
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm">{label}</p>
                     <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                      {member.telegram_username && (
+                        <span>@{member.telegram_username}</span>
+                      )}
+                      {member.telegram_username && member.telegram_id && (
+                        <span className="text-muted-foreground/30">·</span>
+                      )}
                       {member.telegram_id && (
                         <span>ID: {member.telegram_id}</span>
                       )}

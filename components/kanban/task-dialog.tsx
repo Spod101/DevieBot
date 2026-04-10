@@ -103,9 +103,9 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
   async function handleSave() {
     if (!title.trim()) return
     setSaving(true)
-    // assigned_to stores the telegram_username (or telegram_id as fallback)
+    // assigned_to stores name (primary), falling back to username or telegram_id
     const assigned_to = selectedMember
-      ? (selectedMember.telegram_username ?? selectedMember.telegram_id ?? null)
+      ? (selectedMember.name ?? selectedMember.telegram_username ?? selectedMember.telegram_id ?? null)
       : null
     await onSave({
       ...task,

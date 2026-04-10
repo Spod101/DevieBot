@@ -12,14 +12,27 @@ export function memberColor(member: Member): string {
   return COLORS[Math.abs(seed) % COLORS.length]
 }
 
-/** Display label — @username preferred, falls back to telegram_id */
+/** Full display label — name preferred, falls back to @username, then ID */
 export function memberLabel(member: Member): string {
+  if (member.name)              return member.name
   if (member.telegram_username) return `@${member.telegram_username}`
-  if (member.telegram_id) return `#${member.telegram_id}`
+  if (member.telegram_id)       return `#${member.telegram_id}`
   return `Member ${member.id}`
 }
 
-/** Short label for pill display (no @ prefix just the name) */
+/** Short label for pill/badge display — first name only when possible */
 export function memberShortLabel(member: Member): string {
+  if (member.name) return member.name.split(' ')[0]   // first name only
   return member.telegram_username ?? member.telegram_id ?? `${member.id}`
+}
+
+/** Avatar initials (1-2 chars) */
+export function memberInitials(member: Member): string {
+  if (member.name) {
+    const parts = member.name.trim().split(/\s+/)
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+    return parts[0][0].toUpperCase()
+  }
+  const fallback = member.telegram_username?.[0] ?? member.telegram_id?.[0] ?? '?'
+  return fallback.toUpperCase()
 }
