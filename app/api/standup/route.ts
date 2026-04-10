@@ -8,12 +8,14 @@ export async function POST() {
     const result = await sendTelegramMessage(message)
 
     if (!result.ok) {
+      console.error('[standup POST] sendTelegramMessage failed:', result.error)
       return NextResponse.json({ ok: false, error: result.error }, { status: 500 })
     }
 
     return NextResponse.json({ ok: true, message })
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 })
+    console.error('[standup POST] error:', err?.message, err?.stack)
+    return NextResponse.json({ ok: false, error: err?.message ?? String(err) }, { status: 500 })
   }
 }
 

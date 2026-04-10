@@ -50,8 +50,11 @@ export async function generateStandupMessage(): Promise<string> {
     supabase
       .from('code_camps')
       .select('*')
-      .order('start_date', { ascending: true, nullsFirst: false }),
+      .order('start_date', { ascending: true }),
   ])
+
+  if (tasksRes.error) console.error('[standup] tasks query error:', tasksRes.error.message)
+  if (campsRes.error) console.error('[standup] camps query error:', campsRes.error.message)
 
   const rawTasks: any[] = tasksRes.data || []
   const allCamps: CodeCamp[] = campsRes.data || []
