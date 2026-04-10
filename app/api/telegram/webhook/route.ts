@@ -239,6 +239,59 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true })
       }
 
+      // ── /done fast path ──────────────────────────────────────────────
+      if (cmd === '/done') {
+        const taskId = args[0]
+        if (!taskId) {
+          await reply('❌ Provide a task ID.\nExample: `/done a1b2c3`\n\n_Use /tasks to see IDs_')
+          return NextResponse.json({ ok: true })
+        }
+        const { data: tasks } = await supabase
+          .from('tasks').select('id, title').ilike('id', `${taskId}%`).limit(1)
+        if (!tasks || tasks.length === 0) {
+          await reply(`❌ No task found with ID starting with \`${taskId}\``)
+          return NextResponse.json({ ok: true })
+        }
+        await supabase.from('tasks').update({ status: 'done' }).eq('id', tasks[0].id)
+        await reply(`✅ *${tasks[0].title}*\nMarked as done! Great work! 🎉`)
+        return NextResponse.json({ ok: true })
+      }
+
+      // ── /update fast path ─────────────────────────────────────────────
+      if (cmd === '/update') {
+        const taskId = args[0]
+        const statusRaw = args.slice(1).join(' ').toLowerCase()
+          .replace(/mark\s+(as\s+)?/i, '').trim()
+          .replace(/[\s-]+/g, '_')
+
+        if (!taskId || !statusRaw) {
+          await reply('❌ Usage: `/update <id> <status>`\n\nStatuses: `todo · in_progress · in_review · blocked · done`\n\n_Use /tasks to see IDs_')
+          return NextResponse.json({ ok: true })
+        }
+
+        const mappedStatus = STATUS_ALIASES[statusRaw.replace(/_/g, '-')]
+          ?? STATUS_ALIASES[statusRaw]
+          ?? (VALID_STATUSES.includes(statusRaw as TaskStatus) ? statusRaw as TaskStatus : null)
+
+        if (!mappedStatus) {
+          await reply(`❌ Unknown status *${statusRaw}*\nValid: todo, in_progress, in_review, blocked, done`)
+          return NextResponse.json({ ok: true })
+        }
+
+        const { data: tasks } = await supabase
+          .from('tasks').select('id, title').ilike('id', `${taskId}%`).limit(1)
+        if (!tasks || tasks.length === 0) {
+          await reply(`❌ No task found with ID starting with \`${taskId}\``)
+          return NextResponse.json({ ok: true })
+        }
+        await supabase.from('tasks').update({ status: mappedStatus }).eq('id', tasks[0].id)
+        const statusEmoji: Record<string, string> = {
+          todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
+        }
+        await reply(`${statusEmoji[mappedStatus] ?? '📌'} *${tasks[0].title}*\nMoved to: *${mappedStatus.replace(/_/g, ' ')}*`)
+        return NextResponse.json({ ok: true })
+      }
+
       // ── /addtask fast paths ──────────────────────────────────────────
       if (cmd === '/addtask') {
         const mentionsInRest = [...rawRest.matchAll(/@(\w+)/g)]
