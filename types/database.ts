@@ -39,6 +39,7 @@ export interface Resource {
 
 export interface Task {
   id: string
+  task_number: number | null   // human-readable code, e.g. 1 → "T-001"
   title: string
   description: string | null
   priority: TaskPriority
@@ -46,12 +47,18 @@ export interface Task {
   due_date: string | null
   order_index: number
   camp_id: string | null
-  assigned_to: string | null   // telegram_username stored as text
+  assigned_to: string | null   // member name stored as text
   created_at: string
   updated_at: string
   tags?: Tag[]
   comments?: TaskComment[]
   assignees?: Member[]         // derived from assigned_to for display
+}
+
+/** Format task_number as a padded code, e.g. 1 → "T-001" */
+export function taskCode(task: Pick<Task, 'task_number'>): string {
+  if (!task.task_number) return '—'
+  return `T-${String(task.task_number).padStart(3, '0')}`
 }
 
 export interface TaskComment {

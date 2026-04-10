@@ -43,7 +43,7 @@ export async function generateStandupMessage(): Promise<string> {
   const [tasksRes, campsRes] = await Promise.all([
     supabase
       .from('tasks')
-      .select('id, title, status, priority, due_date, assigned_to, camp_id, updated_at')
+      .select('id, task_number, title, status, priority, due_date, assigned_to, camp_id, updated_at')
       .order('priority', { ascending: false }),
     supabase
       .from('code_camps')
@@ -87,13 +87,14 @@ export async function generateStandupMessage(): Promise<string> {
 
   // ── task line formatter ──────────────────────────────────────────────────────
   function taskLine(t: any): string {
+    const code     = t.task_number ? `<code>T-${String(t.task_number).padStart(3, '0')}</code> ` : ''
     const title    = h(t.title)
     const badge    = PRIORITY_BADGE[t.priority] ?? ''
     const assignee = t._assignee ? ` — ${h(t._assignee)}` : ''
     const due      = t.due_date
       ? ` · 📅 ${new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
       : ''
-    return `▸ ${title}${badge}${assignee}${due}`
+    return `▸ ${code}${title}${badge}${assignee}${due}`
   }
 
   // ── section builder ──────────────────────────────────────────────────────────

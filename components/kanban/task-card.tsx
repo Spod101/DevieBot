@@ -3,6 +3,7 @@
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Task } from '@/types/database'
+import { taskCode } from '@/types/database'
 import { TASK_PRIORITIES } from '@/lib/constants'
 import { memberColor, memberShortLabel } from '@/lib/member-utils'
 import { Badge } from '@/components/ui/badge'
@@ -63,13 +64,18 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
           </button>
 
           <div className="flex-1 min-w-0">
-            {/* Title */}
-            <p className={cn(
-              'text-sm font-medium leading-snug',
-              task.status === 'done' && 'line-through text-muted-foreground'
-            )}>
-              {task.title}
-            </p>
+            {/* Code + Title */}
+            <div className="flex items-start gap-1.5">
+              <span className="shrink-0 text-[10px] font-mono font-semibold text-muted-foreground/60 mt-0.5 select-none">
+                {taskCode(task)}
+              </span>
+              <p className={cn(
+                'text-sm font-medium leading-snug',
+                task.status === 'done' && 'line-through text-muted-foreground'
+              )}>
+                {task.title}
+              </p>
+            </div>
 
             {/* Description preview */}
             {task.description && (

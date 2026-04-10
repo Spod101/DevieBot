@@ -25,10 +25,22 @@ const STATUS_ALIASES: Record<string, TaskStatus> = {
 // inside each POST invocation so it captures that request's message_id.
 // This prevents crosstalk between concurrent requests.
 
-// UUID ilike doesn't work in PostgREST — fetch and filter client-side by prefix
-async function findTaskByPrefix(prefix: string, supabase: ReturnType<typeof createServiceClient>) {
-  const { data } = await supabase.from('tasks').select('id, title').limit(500)
-  return (data ?? []).find((t: any) => t.id.startsWith(prefix.toLowerCase())) ?? null
+// Accept "T-001", "t001", "1" (task_number) or a UUID prefix
+async function findTaskByPrefix(input: string, supabase: ReturnType<typeof createServiceClient>) {
+  const clean = input.trim()
+
+  // Match T-001, T001, t-1, t1, or bare number
+  const codeMatch = clean.match(/^t-?0*(\d+)$/i) ?? clean.match(/^0*(\d+)$/)
+  if (codeMatch) {
+    const num = parseInt(codeMatch[1], 10)
+    const { data } = await supabase
+      .from('tasks').select('id, title, task_number').eq('task_number', num).maybeSingle()
+    return data ?? null
+  }
+
+  // Fall back to UUID prefix (client-side)
+  const { data } = await supabase.from('tasks').select('id, title, task_number').limit(500)
+  return (data ?? []).find((t: any) => t.id.startsWith(clean.toLowerCase())) ?? null
 }
 
 // Resolve a @username to the member's display name (stored in assigned_to)
@@ -171,7 +183,7 @@ export async function POST(request: Request) {
 
       let query = supabase
         .from('tasks')
-        .select('id, title, status, priority, assigned_to, camp_id, code_camps(name)')
+        .select('id, task_number, title, status, priority, assigned_to, camp_id, code_camps(name)')
         .neq('status', 'done')
         .order('status')
         .limit(50)
@@ -220,7 +232,8 @@ export async function POST(request: Request) {
           : ''
         const camp = !campFilter && t.code_camps?.name ? ` · ${t.code_camps.name}` : ''
         const title = (t.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        grouped[t.status].push(`• <code>${t.id.slice(0, 6)}</code> ${title}${assignee}${camp}`)
+        const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
+        grouped[t.status].push(`• <code>${code}</code> ${title}${assignee}${camp}`)
       })
 
       Object.entries(grouped).forEach(([status, items]) => {
@@ -382,7 +395,7 @@ export async function POST(request: Request) {
             await reply('❌ Failed to create task.')
           } else {
             const t0 = (task.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            await reply(`✅ Task added!\n<b>${t0}</b>\nID: <code>${task.id.slice(0, 6)}</code> · medium`)
+            await reply(`✅ Task added!\n<b>${t0}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 6)}</code> · medium`)
           }
           return NextResponse.json({ ok: true })
         }
@@ -415,7 +428,7 @@ export async function POST(request: Request) {
           } else {
             const t1 = (task.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             const nameDisplay = (assignedName as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            await reply(`✅ Task added!\n<b>${t1}</b>\nID: <code>${task.id.slice(0, 8)}</code> · ${priority} · ${nameDisplay}`)
+            await reply(`✅ Task added!\n<b>${t1}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 8)}</code> · ${priority} · ${nameDisplay}`)
           }
           return NextResponse.json({ ok: true })
         }
@@ -459,7 +472,7 @@ export async function POST(request: Request) {
           const t3 = (task.title as string).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
           const where = campName ? ` in <b>${campName}</b>` : ''
           const assignee = assignedTo ? ` · @${assignedTo}` : ''
-          await reply(`✅ Task added${where}!\n<b>${t3}</b>\nID: <code>${task.id.slice(0, 8)}</code> · ${validPriority}${assignee}`)
+          await reply(`✅ Task added${where}!\n<b>${t3}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 8)}</code> · ${validPriority}${assignee}`)
         }
         return NextResponse.json({ ok: true })
       }

@@ -16,7 +16,7 @@ export function useTasks(campId?: string | null) {
     // ── 1. Tasks + tags ──────────────────────────────────────────────
     let query = supabase
       .from('tasks')
-      .select('*, tags:task_tags(tag:tags(*))')
+      .select('*, task_number, tags:task_tags(tag:tags(*))')
       .order('order_index', { ascending: true })
 
     if (campId === null) {
