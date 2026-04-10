@@ -19,7 +19,6 @@ import { KanbanColumn } from './kanban-column'
 import { TaskCard } from './task-card'
 import { TaskDialog } from './task-dialog'
 import { useTasks } from '@/hooks/use-tasks'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -140,27 +139,30 @@ export function KanbanBoard({ campId, title }: KanbanBoardProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--primary)' }} />
       </div>
     )
   }
 
   return (
     <div className="flex flex-col h-full">
-      {/* Board header */}
-      <div className="flex items-center gap-3 mb-6 flex-wrap">
+      {/* ── Board toolbar ───────────────────────────────────── */}
+      <div className="flex items-center gap-3 mb-5 flex-wrap">
+        {/* Search */}
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search tasks..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="pl-9"
+            className="pl-9 text-sm"
           />
         </div>
+
+        {/* Priority filter */}
         <Select value={filterPriority} onValueChange={v => setFilterPriority(v as any)}>
-          <SelectTrigger className="w-36">
-            <SlidersHorizontal className="h-4 w-4 mr-2 text-muted-foreground" />
+          <SelectTrigger className="w-36 text-sm">
+            <SlidersHorizontal className="h-3.5 w-3.5 mr-2 shrink-0 text-muted-foreground" />
             <SelectValue placeholder="Priority" />
           </SelectTrigger>
           <SelectContent>
@@ -171,10 +173,15 @@ export function KanbanBoard({ campId, title }: KanbanBoardProps) {
             <SelectItem value="urgent">Urgent</SelectItem>
           </SelectContent>
         </Select>
-        <Button onClick={() => openNewTask()}>
-          <Plus className="h-4 w-4 mr-1" />
+
+        {/* Add task */}
+        <button
+          onClick={() => openNewTask()}
+          className="btn-lime flex items-center gap-2 px-4 py-2 text-sm font-bold"
+        >
+          <Plus className="h-4 w-4" />
           Add Task
-        </Button>
+        </button>
       </div>
 
       {/* Kanban columns */}
@@ -185,13 +192,14 @@ export function KanbanBoard({ campId, title }: KanbanBoardProps) {
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex gap-4 overflow-x-auto pb-4">
+        <div className="grid grid-cols-1 gap-4 pb-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
           {TASK_STATUSES.map(col => (
             <KanbanColumn
               key={col.value}
               status={col.value}
               label={col.label}
               color={col.color}
+              hex={col.hex}
               tasks={getColumnTasks(col.value)}
               onTaskClick={openEditTask}
               onAddTask={openNewTask}
