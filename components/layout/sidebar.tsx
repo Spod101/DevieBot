@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { CodeCamp, Task } from '@/types/database'
+import type { Task } from '@/types/database'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -17,12 +17,8 @@ import {
 import {
   LayoutDashboard,
   KanbanSquare,
-  Tent,
   Settings,
   LogOut,
-  ChevronDown,
-  ChevronRight,
-  Plus,
   Loader2,
   RefreshCw,
   Users,
@@ -34,13 +30,6 @@ import {
 import { toast } from 'sonner'
 import { format, differenceInDays, isToday, isTomorrow, isPast, parseISO } from 'date-fns'
 import { taskCode } from '@/types/database'
-
-const campStatusColor: Record<string, string> = {
-  active:    'var(--primary)',
-  paused:    '#eab308',
-  completed: '#10b981',
-  archived:  'var(--muted-foreground)',
-}
 
 type DeadlineTask = Pick<Task, 'id' | 'task_number' | 'title' | 'due_date' | 'priority' | 'assigned_to' | 'camp_id' | 'status'>
 
@@ -58,8 +47,6 @@ export function Sidebar() {
   const router    = useRouter()
   const supabase  = createClient()
 
-  const [camps, setCamps]                 = useState<CodeCamp[]>([])
-  const [campsOpen, setCampsOpen]         = useState(true)
   const [loggingOut, setLoggingOut]       = useState(false)
   const [syncing, setSyncing]             = useState(false)
   const [now, setNow]                     = useState<Date | null>(null)
@@ -67,7 +54,6 @@ export function Sidebar() {
   const [mobileOpen, setMobileOpen]       = useState(false)
 
   useEffect(() => {
-    fetchCamps()
     fetchDeadlines()
     moveOverdueTasks()
   }, [])
@@ -116,16 +102,8 @@ export function Sidebar() {
   async function handleSync() {
     setSyncing(true)
     router.refresh()
-    await Promise.all([fetchCamps(), fetchDeadlines()])
+    await fetchDeadlines()
     setSyncing(false)
-  }
-
-  async function fetchCamps() {
-    const { data } = await supabase
-      .from('code_camps')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (data) setCamps(data)
   }
 
   async function handleLogout() {
@@ -138,8 +116,7 @@ export function Sidebar() {
 
   const navItems = [
     { href: '/dashboard',          label: 'Overview',      icon: LayoutDashboard },
-    { href: '/dashboard/board',    label: 'General Board', icon: KanbanSquare },
-    { href: '/dashboard/camps',    label: 'Code Camps',    icon: Tent },
+    { href: '/dashboard/board',    label: 'Task Board',    icon: KanbanSquare },
     { href: '/dashboard/team',     label: 'Team',          icon: Users },
     { href: '/dashboard/settings', label: 'Settings',      icon: Settings },
   ]
@@ -279,61 +256,6 @@ export function Sidebar() {
             })}
           </nav>
 
-          {/* ── Code Camps ────────────────────────── */}
-          <div className="px-3 mt-6">
-            <button
-              onClick={() => setCampsOpen(v => !v)}
-              className="mono-tag w-full px-3 py-2 hover:text-foreground transition-colors"
-              style={{ justifyContent: 'space-between' }}
-            >
-              <span>Code Camps</span>
-              {campsOpen
-                ? <ChevronDown className="h-3 w-3" />
-                : <ChevronRight className="h-3 w-3" />
-              }
-            </button>
-
-            {campsOpen && (
-              <div className="mt-1 space-y-0.5">
-                {camps.map(camp => {
-                  const active = pathname === `/dashboard/camps/${camp.id}`
-                  const dot    = campStatusColor[camp.status] ?? 'var(--muted-foreground)'
-                  return (
-                    <Link key={camp.id} href={`/dashboard/camps/${camp.id}`} onClick={() => setMobileOpen(false)}>
-                      <div
-                        className={cn(
-                          'flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs cursor-pointer transition-all',
-                          active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-                        )}
-                        style={{
-                          background: active ? 'var(--sidebar-accent)' : 'transparent',
-                          border:     active ? '1px solid var(--sidebar-border)' : '1px solid transparent',
-                        }}
-                      >
-                        <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: dot }} />
-                        <span className="truncate" style={{ fontFamily: 'var(--font-space-grotesk)' }}>
-                          {camp.name}
-                        </span>
-                        <span
-                          className="ml-auto shrink-0 text-muted-foreground/60"
-                          style={{ fontFamily: 'var(--font-jetbrains-mono)', fontSize: '10px' }}
-                        >
-                          {camp.progress}%
-                        </span>
-                      </div>
-                    </Link>
-                  )
-                })}
-
-                <Link href="/dashboard/camps" onClick={() => setMobileOpen(false)}>
-                  <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-muted-foreground hover:text-foreground cursor-pointer transition-colors">
-                    <Plus className="h-3.5 w-3.5" />
-                    <span style={{ fontFamily: 'var(--font-space-grotesk)' }}>New Camp</span>
-                  </div>
-                </Link>
-              </div>
-            )}
-          </div>
         </ScrollArea>
 
         {/* ── Bottom card: Manila Clock + Near Deadlines ─────────────── */}
@@ -393,9 +315,7 @@ export function Sidebar() {
               <div className="space-y-0.5 mb-1">
                 {deadlineTasks.map(task => {
                   const due = relativeDue(task.due_date!)
-                  const href = task.camp_id
-                    ? `/dashboard/camps/${task.camp_id}`
-                    : '/dashboard/board'
+                  const href = '/dashboard/board'
                   const isOverdue = due.label === 'overdue'
 
                   return (

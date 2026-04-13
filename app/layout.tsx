@@ -18,7 +18,7 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: 'Devie Dashboard',
-  description: 'Admin dashboard with Kanban task tracker and Code Camp management',
+  description: 'Admin dashboard with Kanban task tracker',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

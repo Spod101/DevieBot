@@ -1,29 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/service'
-import type { CodeCamp } from '@/types/database'
 
 const DIV = '─────────────────────'
-
-function campIcon(camp: CodeCamp, today: Date): string {
-  if (camp.status === 'completed') return '✅'
-  if (camp.status === 'paused')    return '⏸'
-  if (camp.status === 'archived')  return '📦'
-  if (!camp.start_date)            return '🚀'
-  const daysAway = Math.ceil(
-    (new Date(camp.start_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-  )
-  if (daysAway <= 14) return '🟢'
-  if (daysAway <= 60) return '📌'
-  return '🚀'
-}
-
-function formatCampDate(camp: CodeCamp): string {
-  if (!camp.start_date) return 'TBC'
-  return new Date(camp.start_date).toLocaleDateString('en-US', {
-    month: 'long', day: 'numeric', year: 'numeric',
-  })
-}
-
-const h = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 const PRIORITY_BADGE: Record<string, string> = {
   urgent: ' 🔴 URGENT',
@@ -35,22 +12,14 @@ const PRIORITY_BADGE: Record<string, string> = {
 export async function generateStandupMessage(): Promise<string> {
   const supabase = createServiceClient()
 
-  const [tasksRes, campsRes] = await Promise.all([
-    supabase
-      .from('tasks')
-      .select('id, task_number, title, status, priority, due_date, assigned_to, camp_id, updated_at')
-      .order('priority', { ascending: false }),
-    supabase
-      .from('code_camps')
-      .select('*')
-      .order('start_date', { ascending: true }),
-  ])
+  const { data, error } = await supabase
+    .from('tasks')
+    .select('id, task_number, title, status, priority, due_date, assigned_to, updated_at')
+    .order('priority', { ascending: false })
 
-  if (tasksRes.error) console.error('[standup] tasks query error:', tasksRes.error.message)
-  if (campsRes.error) console.error('[standup] camps query error:', campsRes.error.message)
+  if (error) console.error('[standup] tasks query error:', error.message)
 
-  const rawTasks: any[] = tasksRes.data || []
-  const allCamps: CodeCamp[] = campsRes.data || []
+  const rawTasks: any[] = data || []
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -71,13 +40,12 @@ export async function generateStandupMessage(): Promise<string> {
   )
   const activeTasks  = tasks.filter(t => t.status !== 'done')
 
-  const upcomingCamps = allCamps.filter(c => c.status === 'active' || c.status === 'paused')
-  const completedCamps = allCamps.filter(c => c.status === 'completed').length
-
   const dateStr = today.toLocaleDateString('en-PH', {
     timeZone: 'Asia/Manila',
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   })
+
+  const h = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
   function taskLine(t: any): string {
     const code     = t.task_number ? `<code>T-${String(t.task_number).padStart(3, '0')}</code> ` : ''
@@ -110,26 +78,6 @@ export async function generateStandupMessage(): Promise<string> {
   msg += `✅ Done: <b>${doneTasks.length}</b>\n`
   msg += `🚧 Blocked: <b>${blocked.length}</b>\n`
   msg += `⏰ Overdue: <b>${overdue.length}</b>\n`
-  if (allCamps.length > 0) {
-    msg += `🏕️ Camps: <b>${upcomingCamps.length} active</b>`
-    if (completedCamps > 0) msg += `, ${completedCamps} completed`
-    msg += '\n'
-  }
-
-  if (upcomingCamps.length > 0) {
-    msg += `\n\n📅 <b>UPCOMING CAMPS</b>\n`
-    msg += `${DIV}\n`
-    upcomingCamps.forEach(camp => {
-      const icon = campIcon(camp, today)
-      const date = formatCampDate(camp)
-      msg += `${icon} <b>${h(camp.name)}</b> — ${h(date)}\n`
-      const sub = [
-        camp.venue          && `📍 ${h(camp.venue)}`,
-        camp.contact_person && `👤 ${h(camp.contact_person)}`,
-      ].filter(Boolean).join(' · ')
-      if (sub) msg += `   ${sub}\n`
-    })
-  }
 
   msg += section('⏰', 'OVERDUE',      overdue,      5)
   msg += section('🚧', 'BLOCKED',      blocked,     10)

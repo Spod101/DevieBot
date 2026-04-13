@@ -267,14 +267,12 @@ export async function POST(request: Request) {
         `🤖 <b>Devie Bot — Commands</b>\n\n` +
         `📋 <b>View</b>\n` +
         `/tasks — list active tasks\n` +
-        `/camps — list code camps\n` +
         `/deadlines — show upcoming deadlines\n` +
         `/standup — send standup report\n\n` +
         `➕ <b>Create</b>\n` +
         `/addtask &lt;title&gt; — add a task (7-day deadline by default)\n` +
         `/addtask &lt;title&gt; by Friday — task with specific deadline\n` +
-        `/addtask &lt;title&gt; @username — assign to someone\n` +
-        `/addcamp &lt;name&gt; — create a new camp\n\n` +
+        `/addtask &lt;title&gt; @username — assign to someone\n\n` +
         `✏️ <b>Update</b>\n` +
         `/done &lt;number or keyword&gt; — e.g. /done 23 or /done login bug\n` +
         `/update &lt;number or keyword&gt; &lt;status&gt; — e.g. /update login in review\n` +
@@ -347,27 +345,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    // ── /tasks [@name ...] [--camp <name>] ───────────────────────────
+    // ── /tasks [@name ...] ──────────────────────────────────────────
     if (cmd === '/tasks') {
-      // Parse filters: @mentions and --camp
       const mentionedUsers = [...rest.matchAll(/@(\w+)/g)].map(m => m[1].toLowerCase())
-      const campFilter = rest.match(/--camp\s+(.+?)(?=\s+--|$|@)/i)?.[1]?.trim() ?? null
-
-      if (!rest && mentionedUsers.length === 0) {
-        // Show usage hint alongside results only if no filters
-      }
-
-      // Resolve @mentions to member names (how assigned_to is now stored)
       const resolvedNames = await Promise.all(mentionedUsers.map(u => resolveName(u, supabase)))
 
       let query = supabase
         .from('tasks')
-        .select('id, task_number, title, status, priority, assigned_to, camp_id, code_camps(name)')
+        .select('id, task_number, title, status, priority, assigned_to')
         .neq('status', 'done')
         .order('status')
         .limit(50)
 
-      // Filter by resolved name or fall back to raw username
       if (resolvedNames.length === 1) {
         query = query.ilike('assigned_to', resolvedNames[0])
       } else if (resolvedNames.length > 1) {
@@ -375,19 +364,11 @@ export async function POST(request: Request) {
       }
 
       const { data: tasks } = await query
-
-      // Filter by camp client-side
-      let filtered = tasks ?? []
-      if (campFilter) {
-        filtered = filtered.filter((t: any) =>
-          t.code_camps?.name?.toLowerCase().includes(campFilter.toLowerCase())
-        )
-      }
+      const filtered = tasks ?? []
 
       if (filtered.length === 0) {
         const who = resolvedNames.length ? ` for ${resolvedNames.join(', ')}` : ''
-        const where = campFilter ? ` in <b>${campFilter}</b>` : ''
-        await reply(`📋 No active tasks${who}${where}.`)
+        await reply(`📋 No active tasks${who}.`)
         return NextResponse.json({ ok: true })
       }
 
@@ -396,62 +377,29 @@ export async function POST(request: Request) {
         in_review: '👀 In Review', blocked: '🚧 Blocked',
       }
 
-      // Build header — show resolved names not raw @usernames
       const who = resolvedNames.length ? ` · ${resolvedNames.join(', ')}` : ''
-      const where = campFilter ? ` · ${campFilter}` : ''
-      let msg = `📋 <b>Tasks${who}${where}</b>\n\n`
+      let msg = `📋 <b>Tasks${who}</b>\n\n`
 
-      // Group by status
       const grouped: Record<string, string[]> = {}
       filtered.forEach((t: any) => {
         if (!grouped[t.status]) grouped[t.status] = []
-        // Show assignee name when listing all tasks (not filtered by a specific person)
-        const assignee = !resolvedNames.length && t.assigned_to
-          ? ` — ${esc(t.assigned_to)}`
-          : ''
-        const camp = !campFilter && t.code_camps?.name ? ` · ${t.code_camps.name}` : ''
-        const title = esc(t.title)
+        const assignee = !resolvedNames.length && t.assigned_to ? ` — ${esc(t.assigned_to)}` : ''
         const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
-        grouped[t.status].push(`• <code>${code}</code> ${title}${assignee}${camp}`)
+        grouped[t.status].push(`• <code>${code}</code> ${esc(t.title)}${assignee}`)
       })
 
       Object.entries(grouped).forEach(([status, items]) => {
         msg += `${labels[status] || status}\n${items.join('\n')}\n\n`
       })
 
-      msg += `<i>Filter: /tasks @name · /tasks --camp Backend</i>`
+      msg += `<i>Filter: /tasks @name</i>`
 
       await reply(msg)
       return NextResponse.json({ ok: true })
     }
 
-    // ── /camps ────────────────────────────────────────────────────────
-    if (cmd === '/camps') {
-      const { data: camps } = await supabase
-        .from('code_camps').select('name, status, progress').order('status')
-
-      if (!camps || camps.length === 0) {
-        await reply('🏕️ No Code Camps found.')
-        return NextResponse.json({ ok: true })
-      }
-
-      const emoji: Record<string, string> = {
-        active: '🟢', paused: '🟡', completed: '🔵', archived: '⚫',
-      }
-
-      let msg = `🏕️ <b>Code Camps</b>\n\n`
-      camps.forEach((c: any) => {
-        const filled = Math.round(c.progress / 10)
-        const bar = '█'.repeat(filled) + '░'.repeat(10 - filled)
-        const name = esc(c.name)
-        msg += `${emoji[c.status] ?? '⚪'} <b>${name}</b>\n  ${bar} ${c.progress}%\n\n`
-      })
-      await reply(msg)
-      return NextResponse.json({ ok: true })
-    }
-
-    // ── /addtask, /addcamp, /done, /update — NLP-powered ─────────────
-    if (['/addtask', '/addcamp', '/done', '/update'].includes(cmd)) {
+    // ── /addtask, /done, /update — NLP-powered ──────────────────────
+    if (['/addtask', '/done', '/update'].includes(cmd)) {
       if (!rest) {
         const examples: Record<string, string> = {
           '/addtask': (
@@ -461,7 +409,6 @@ export async function POST(request: Request) {
             `/addtask fix login bug, high priority\n` +
             `/addtask fix login @dale urgent`
           ),
-          '/addcamp': `Usage: <code>/addcamp &lt;name&gt;</code>\n\n<b>Example:</b>\n/addcamp Backend`,
           '/done': (
             `Usage: <code>/done &lt;number or keyword&gt;</code>\n\n` +
             `<b>Examples:</b>\n` +
@@ -654,13 +601,11 @@ export async function POST(request: Request) {
       }
 
       // Load context for NLP
-      const [campsRes, tasksRes] = await Promise.all([
-        supabase.from('code_camps').select('name').eq('status', 'active'),
-        supabase.from('tasks').select('id, title, status, task_number').neq('status', 'done').limit(20),
-      ])
+      const { data: tasksForNlp } = await supabase
+        .from('tasks').select('id, title, status, task_number').neq('status', 'done').limit(20)
       const intent = await parseMessage(text, {
-        camps: (campsRes.data ?? []).map((c: any) => c.name),
-        recentTasks: tasksRes.data ?? [],
+        camps: [],
+        recentTasks: tasksForNlp ?? [],
       })
 
       // ── addtask ──
@@ -672,40 +617,15 @@ export async function POST(request: Request) {
         }
         const validPriority = VALID_PRIORITIES.includes(priority) ? priority : 'medium'
         const due = validDate(parsedDue) ?? defaultDueDate()
-        let campId: string | null = null
-        if (campName) {
-          const { data: camps } = await supabase
-            .from('code_camps').select('id, name').ilike('name', `%${campName}%`).limit(1)
-          if (!camps || camps.length === 0) {
-            await reply(`❌ No camp found matching <b>"${campName}"</b>.\nUse /camps to see all camps.`)
-            return NextResponse.json({ ok: true })
-          }
-          campId = camps[0].id
-        }
         const { data: task, error } = await supabase
           .from('tasks')
-          .insert({ title, status: 'todo', priority: validPriority, order_index: 0, camp_id: campId, assigned_to: assignedTo ?? null, due_date: due, description: null })
+          .insert({ title, status: 'todo', priority: validPriority, order_index: 0, camp_id: null, assigned_to: assignedTo ?? null, due_date: due, description: null })
           .select().single()
         if (error || !task) {
           await reply('❌ Failed to create task.')
         } else {
           const t3 = esc(task.title)
           await reply(taskAddedMsg({ ...task, priority: validPriority, due_date: due, assigned_to: assignedTo ?? null }, campName))
-        }
-        return NextResponse.json({ ok: true })
-      }
-
-      // ── addcamp ──
-      if (intent.intent === 'addcamp') {
-        const { data: camp, error } = await supabase
-          .from('code_camps')
-          .insert({ name: intent.campName, status: 'active', progress: 0, resources: [] })
-          .select().single()
-        if (error || !camp) {
-          await reply('❌ Failed to create camp.')
-        } else {
-          const cn = esc(camp.name)
-          await reply(`🏕️ Camp <b>${cn}</b> created!\nAdd tasks with /addtask &lt;title&gt; ${cn} camp`)
         }
         return NextResponse.json({ ok: true })
       }
@@ -837,13 +757,11 @@ export async function POST(request: Request) {
     // Only fires when the message contains recognisable status-related words,
     // keeping Claude API calls out of ordinary group chatter.
     if (!cmd.startsWith('/') && NLU_TRIGGER.test(text)) {
-      const [campsRes, tasksRes] = await Promise.all([
-        supabase.from('code_camps').select('name').eq('status', 'active'),
-        supabase.from('tasks').select('id, title, status, task_number').neq('status', 'done').limit(30),
-      ])
+      const { data: nluTasks } = await supabase
+        .from('tasks').select('id, title, status, task_number').neq('status', 'done').limit(30)
       const intent = await parseMessage(text, {
-        camps: (campsRes.data ?? []).map((c: any) => c.name),
-        recentTasks: tasksRes.data ?? [],
+        camps: [],
+        recentTasks: nluTasks ?? [],
       })
 
       if (intent.intent === 'update') {
