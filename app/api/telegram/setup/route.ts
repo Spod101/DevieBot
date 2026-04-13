@@ -2,14 +2,14 @@ import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 
 const COMMANDS = [
-  { command: 'tasks',   description: 'List active tasks' },
-  { command: 'camps',   description: 'List code camps' },
-  { command: 'standup', description: 'Send standup report' },
-  { command: 'addtask', description: 'Add a task — /addtask <title>' },
-  { command: 'addcamp', description: 'Create a camp — /addcamp <name>' },
-  { command: 'done',    description: 'Mark task done — /done <id>' },
-  { command: 'update',  description: 'Update task status — /update <id> <status>' },
-  { command: 'help',    description: 'Show all commands' },
+  { command: 'tasks',     description: 'List active tasks' },
+  { command: 'camps',     description: 'List code camps' },
+  { command: 'deadlines', description: 'Show upcoming deadlines' },
+  { command: 'addtask',   description: 'Add a task — /addtask <title>' },
+  { command: 'addcamp',   description: 'Create a camp — /addcamp <name>' },
+  { command: 'done',      description: 'Mark task done — /done <id or title>' },
+  { command: 'update',    description: 'Update task status — /update <id> <status>' },
+  { command: 'help',      description: 'Show all commands' },
 ]
 
 async function getToken(): Promise<string | null> {

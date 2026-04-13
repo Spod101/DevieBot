@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
   Loader2, Bot, Send, Webhook, CheckCircle2, XCircle, RefreshCw,
-  Sun, Moon, Monitor,
+  Sun, Moon, Monitor, ListChecks,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -118,6 +118,7 @@ export default function SettingsPage() {
   } | null>(null)
   const [checkingWebhook,     setCheckingWebhook]     = useState(false)
   const [registeringWebhook,  setRegisteringWebhook]  = useState(false)
+  const [syncingCommands,     setSyncingCommands]     = useState(false)
 
   function addLog(status: 'ok' | 'error' | 'info', msg: string) {
     const time = new Date().toLocaleTimeString('en-PH', {
@@ -166,6 +167,25 @@ export default function SettingsPage() {
       }
     } catch { addLog('error', 'Could not reach Telegram API') }
     setRegisteringWebhook(false)
+  }
+
+  async function handleSyncCommands() {
+    if (!configured) { toast.error('Save your bot token first'); return }
+    setSyncingCommands(true)
+    addLog('info', 'Syncing bot command list...')
+    try {
+      const base = process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin
+      const res  = await fetch(`${base}/api/telegram/setup`)
+      const data = await res.json()
+      if (data.ok) {
+        toast.success('Bot commands synced!')
+        addLog('ok', 'Command list updated on Telegram')
+      } else {
+        toast.error(data.description || 'Sync failed')
+        addLog('error', data.description || 'Command sync failed')
+      }
+    } catch { addLog('error', 'Could not reach Telegram API') }
+    setSyncingCommands(false)
   }
 
   useEffect(() => { fetchConfig(); checkWebhook() }, [])
@@ -383,6 +403,11 @@ export default function SettingsPage() {
                 Register
               </button>
             </div>
+
+            <OutlineBtn onClick={handleSyncCommands} disabled={syncingCommands || !configured} className="w-full">
+              {syncingCommands ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListChecks className="h-4 w-4" />}
+              Sync Bot Commands
+            </OutlineBtn>
           </Card>
 
           {/* Daily Standup */}
