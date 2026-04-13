@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Loader2, LayoutDashboard, Eye, EyeOff } from 'lucide-react'
+import { Loader2, Eye, EyeOff } from 'lucide-react'
+import Image from 'next/image'
 
 const ADMIN_EMAIL = 'claytondalet@gmail.com'
 
@@ -43,9 +44,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-3">
-            <div className="p-3 rounded-xl bg-primary/10">
-              <LayoutDashboard className="h-8 w-8 text-primary" />
-            </div>
+            <Image src="/icons/icon.png" alt="Devie" width={64} height={64} className="object-contain" />
           </div>
           <CardTitle className="text-2xl">Devie</CardTitle>
           <CardDescription>Enter your admin password to continue</CardDescription>
