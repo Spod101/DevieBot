@@ -1,6 +1,7 @@
 import type { TaskStatus, TaskPriority } from '@/types/database'
 
 export const TASK_STATUSES: { value: TaskStatus; label: string; color: string; hex: string }[] = [
+  { value: 'backlog',     label: 'Backlog',     color: 'bg-purple-500', hex: '#a855f7' },
   { value: 'todo',        label: 'To Do',       color: 'bg-slate-500',  hex: 'rgba(148,163,184,0.7)' },
   { value: 'in_progress', label: 'In Progress', color: 'bg-blue-500',   hex: '#60a5fa' },
   { value: 'in_review',   label: 'In Review',   color: 'bg-yellow-500', hex: '#eab308' },

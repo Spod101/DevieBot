@@ -1,8 +1,21 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { generateStandupMessage, sendTelegramMessage } from '@/lib/standup'
-import { parseBulkTasks, parseMessage, parseStatus } from '@/lib/nlp'
+import { parseBulkTasks, parseMessage, parseStatus, extractDueDate, DEADLINE_KEYWORDS } from '@/lib/nlp'
 import type { TaskStatus } from '@/types/database'
+
+/** Returns a due date 7 days from today (ISO YYYY-MM-DD) */
+function defaultDueDate(): string {
+  const d = new Date()
+  d.setDate(d.getDate() + 7)
+  return d.toISOString().split('T')[0]
+}
+
+/** Validates an ISO date string; returns it or null */
+function validDate(d: string | null | undefined): string | null {
+  if (!d) return null
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null
+}
 
 // Escape HTML special characters for Telegram HTML parse mode
 function esc(s: string): string {
@@ -13,10 +26,11 @@ function esc(s: string): string {
 // Avoids calling the Claude API on every group message.
 const NLU_TRIGGER = /\b(working on|wip|in[\s-]?progress|started|picking up|reviewing|in[\s-]?review|blocked|stuck|waiting for|finished|completed|done|shipped|delivered|wrapped)\b/i
 
-const VALID_STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'blocked', 'done']
+const VALID_STATUSES: TaskStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done']
 const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent']
 
 const STATUS_ALIASES: Record<string, TaskStatus> = {
+  backlog: 'backlog',
   todo: 'todo',
   'in-progress': 'in_progress',
   inprogress: 'in_progress',
@@ -191,16 +205,75 @@ export async function POST(request: Request) {
         `📋 <b>View</b>\n` +
         `/tasks — list active tasks\n` +
         `/camps — list code camps\n` +
+        `/deadlines — show upcoming deadlines\n` +
         `/standup — send standup report\n\n` +
         `➕ <b>Create</b>\n` +
-        `/addtask &lt;title&gt; — add a task\n` +
+        `/addtask &lt;title&gt; — add a task (7-day deadline by default)\n` +
+        `/addtask &lt;title&gt; by Friday — task with specific deadline\n` +
         `/addtask &lt;title&gt; @username — assign to someone\n` +
         `/addcamp &lt;name&gt; — create a new camp\n\n` +
         `✏️ <b>Update</b>\n` +
         `/done &lt;id&gt; — mark task as done\n` +
         `/update &lt;id&gt; &lt;status&gt; — update task status\n` +
-        `<i>Statuses: todo, in progress, in review, blocked, done</i>`
+        `<i>Statuses: backlog, todo, in progress, in review, blocked, done</i>`
       )
+      return NextResponse.json({ ok: true })
+    }
+
+    // ── /deadlines ────────────────────────────────────────────────────
+    if (cmd === '/deadlines') {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const todayStr = today.toISOString().split('T')[0]
+      const in7days = new Date(today)
+      in7days.setDate(today.getDate() + 7)
+      const in7Str = in7days.toISOString().split('T')[0]
+
+      const { data: tasks } = await supabase
+        .from('tasks')
+        .select('id, task_number, title, due_date, priority, assigned_to, status')
+        .lte('due_date', in7Str)
+        .neq('status', 'done')
+        .order('due_date', { ascending: true })
+        .limit(20)
+
+      if (!tasks || tasks.length === 0) {
+        await reply('📅 No tasks with deadlines in the next 7 days.')
+        return NextResponse.json({ ok: true })
+      }
+
+      const overdue = tasks.filter((t: any) => t.due_date < todayStr)
+      const dueToday = tasks.filter((t: any) => t.due_date === todayStr)
+      const upcoming = tasks.filter((t: any) => t.due_date > todayStr)
+
+      function taskLine(t: any): string {
+        const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
+        const assignee = t.assigned_to ? ` — ${esc(t.assigned_to)}` : ''
+        return `• <code>${code}</code> ${esc(t.title)}${assignee}`
+      }
+
+      let msg = `📅 <b>Deadlines</b>\n\n`
+      if (overdue.length > 0) {
+        msg += `🔴 <b>Overdue (${overdue.length})</b>\n`
+        overdue.forEach((t: any) => { msg += taskLine(t) + '\n' })
+        msg += '\n'
+      }
+      if (dueToday.length > 0) {
+        msg += `🟠 <b>Due Today (${dueToday.length})</b>\n`
+        dueToday.forEach((t: any) => { msg += taskLine(t) + '\n' })
+        msg += '\n'
+      }
+      if (upcoming.length > 0) {
+        msg += `🟡 <b>Due This Week (${upcoming.length})</b>\n`
+        upcoming.forEach((t: any) => {
+          const dueDate = new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
+          const assignee = t.assigned_to ? ` — ${esc(t.assigned_to)}` : ''
+          msg += `• <code>${code}</code> ${esc(t.title)} · ${dueDate}${assignee}\n`
+        })
+      }
+      msg += `\n<i>Use /done &lt;id&gt; to mark complete</i>`
+      await reply(msg)
       return NextResponse.json({ ok: true })
     }
 
@@ -415,6 +488,7 @@ export async function POST(request: Request) {
             title: t.title, status: 'todo' as TaskStatus,
             priority: t.priority, order_index: 0,
             assigned_to: t.assignee, camp_id: null,
+            due_date: validDate(t.dueDate) ?? defaultDueDate(),
           }))
           const { data: created, error } = await supabase.from('tasks').insert(inserts).select()
           if (error || !created) {
@@ -436,21 +510,29 @@ export async function POST(request: Request) {
         // Simple title (no flags, no @, no commas) → check trailing name then insert
         const isSimple = !rawRest.includes('--') && mentionsInRest.length === 0 && !rawRest.includes(',')
         if (isSimple) {
+          // Extract deadline if keywords present, then strip it from the title
+          let simpleText = rest
+          let simpleDueDate: string | null = null
+          if (DEADLINE_KEYWORDS.test(rest)) {
+            const extracted = await extractDueDate(rest)
+            simpleDueDate = extracted.dueDate
+            simpleText = extracted.cleanText || rest
+          }
           // Try to detect a member name at the end of the title (e.g. "Fix bug David")
-          const { title: parsedTitle, assignee } = await resolveAssigneeByName(rest, supabase)
-          const finalTitle  = parsedTitle || rest
+          const { title: parsedTitle, assignee } = await resolveAssigneeByName(simpleText, supabase)
+          const finalTitle = parsedTitle || simpleText
+          const due = simpleDueDate ?? defaultDueDate()
           const { data: task, error } = await supabase
             .from('tasks')
-            .insert({ title: finalTitle, status: 'todo', priority: 'medium', order_index: 0, assigned_to: assignee })
+            .insert({ title: finalTitle, status: 'todo', priority: 'medium', order_index: 0, assigned_to: assignee, due_date: due })
             .select().single()
           if (error || !task) {
             await reply('❌ Failed to create task.')
           } else {
             const t0 = esc(task.title)
-            const assigneeLine = assignee
-              ? ` · ${esc(assignee)}`
-              : ''
-            await reply(`✅ Task added!\n<b>${t0}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 6)}</code> · medium${assigneeLine}`)
+            const assigneeLine = assignee ? ` · ${esc(assignee)}` : ''
+            const dueDisplay = new Date(due).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+            await reply(`✅ Task added!\n<b>${t0}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 6)}</code> · medium · 📅 ${dueDisplay}${assigneeLine}`)
           }
           return NextResponse.json({ ok: true })
         }
@@ -470,20 +552,29 @@ export async function POST(request: Request) {
             priority = priorityMatch[1].toLowerCase()
             titleRaw = titleRaw.replace(priorityMatch[0], '').replace(/\s+/g, ' ').trim()
           }
+          // Extract deadline if keywords present
+          let mentionDueDate: string | null = null
+          if (DEADLINE_KEYWORDS.test(titleRaw)) {
+            const extracted = await extractDueDate(titleRaw)
+            mentionDueDate = extracted.dueDate
+            titleRaw = extracted.cleanText || titleRaw
+          }
           if (!titleRaw) {
             await reply('❌ Task title cannot be empty.')
             return NextResponse.json({ ok: true })
           }
+          const due = mentionDueDate ?? defaultDueDate()
           const { data: task, error } = await supabase
             .from('tasks')
-            .insert({ title: titleRaw, status: 'todo', priority, order_index: 0, assigned_to: assignedName })
+            .insert({ title: titleRaw, status: 'todo', priority, order_index: 0, assigned_to: assignedName, due_date: due })
             .select().single()
           if (error || !task) {
             await reply('❌ Failed to create task.')
           } else {
             const t1 = esc(task.title)
             const nameDisplay = esc(assignedName)
-            await reply(`✅ Task added!\n<b>${t1}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 8)}</code> · ${priority} · ${nameDisplay}`)
+            const dueDisplay = new Date(due).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+            await reply(`✅ Task added!\n<b>${t1}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 8)}</code> · ${priority} · ${nameDisplay} · 📅 ${dueDisplay}`)
           }
           return NextResponse.json({ ok: true })
         }
@@ -501,12 +592,13 @@ export async function POST(request: Request) {
 
       // ── addtask ──
       if (intent.intent === 'addtask') {
-        const { title, priority = 'medium', campName, assignedTo } = intent
+        const { title, priority = 'medium', campName, assignedTo, dueDate: parsedDue } = intent
         if (!title) {
           await reply('❌ Task title cannot be empty.')
           return NextResponse.json({ ok: true })
         }
         const validPriority = VALID_PRIORITIES.includes(priority) ? priority : 'medium'
+        const due = validDate(parsedDue) ?? defaultDueDate()
         let campId: string | null = null
         if (campName) {
           const { data: camps } = await supabase
@@ -519,7 +611,7 @@ export async function POST(request: Request) {
         }
         const { data: task, error } = await supabase
           .from('tasks')
-          .insert({ title, status: 'todo', priority: validPriority, order_index: 0, camp_id: campId, assigned_to: assignedTo ?? null })
+          .insert({ title, status: 'todo', priority: validPriority, order_index: 0, camp_id: campId, assigned_to: assignedTo ?? null, due_date: due })
           .select().single()
         if (error || !task) {
           await reply('❌ Failed to create task.')
@@ -527,7 +619,8 @@ export async function POST(request: Request) {
           const t3 = esc(task.title)
           const where = campName ? ` in <b>${campName}</b>` : ''
           const assignee = assignedTo ? ` · @${assignedTo}` : ''
-          await reply(`✅ Task added${where}!\n<b>${t3}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 8)}</code> · ${validPriority}${assignee}`)
+          const dueDisplay = new Date(due).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          await reply(`✅ Task added${where}!\n<b>${t3}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 8)}</code> · ${validPriority} · 📅 ${dueDisplay}${assignee}`)
         }
         return NextResponse.json({ ok: true })
       }
@@ -612,6 +705,7 @@ export async function POST(request: Request) {
         order_index: 0,
         assigned_to: t.assignee,
         camp_id: null,
+        due_date: validDate(t.dueDate) ?? defaultDueDate(),
       }))
 
       const { data: created, error } = await supabase.from('tasks').insert(inserts).select()

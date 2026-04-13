@@ -1,5 +1,5 @@
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
-export type TaskStatus = 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done'
+export type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done'
 export type CampStatus = 'active' | 'completed' | 'archived' | 'paused'
 
 export interface Tag {
