@@ -170,7 +170,7 @@ export function Sidebar() {
               width={40}
               height={40}
               className="w-full h-full object-cover"
-              style={{ mixBlendMode: 'screen', opacity: 0.92 }}
+              style={{  }}
             />
           </div>
 
