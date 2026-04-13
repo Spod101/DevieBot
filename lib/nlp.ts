@@ -73,35 +73,84 @@ If the text does not clearly indicate a task status, return exactly: null`,
 // Gate — only call extractDueDate when these keywords are present
 export const DEADLINE_KEYWORDS = /\b(by|due|until|before|deadline|tomorrow|tonight|today|next\s+week|next\s+\w+day|in\s+\d+\s+days?|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i
 
+const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+
 /**
  * Extract a due date from natural language text.
- * Returns ISO date string (YYYY-MM-DD) or null if nothing found.
- * Also returns the text with the deadline phrase stripped.
+ * Regex-first for common patterns (today/tomorrow/days/weekdays) — zero Claude calls.
+ * Falls back to Claude only for complex date phrases (e.g. "April 20", "end of month").
+ * Also strips the deadline phrase from the text.
  */
 export async function extractDueDate(text: string): Promise<{ dueDate: string | null; cleanText: string }> {
-  const today = new Date().toISOString().split('T')[0]
-  const response = await client.messages.create({
-    model: 'claude-haiku-4-5',
-    max_tokens: 80,
-    system: `Today is ${today}.
-Extract any deadline from the user text and return ONLY a JSON object with two fields:
-- "dueDate": the date in YYYY-MM-DD format, or null if no deadline is mentioned
-- "cleanText": the original text with the deadline phrase removed (trimmed)
+  const base = new Date()
+  base.setHours(0, 0, 0, 0)
+  const todayStr = base.toISOString().split('T')[0]
+  const lower = text.toLowerCase()
 
-Return ONLY raw JSON, no markdown, no explanation.
-Example: {"dueDate":"2026-04-16","cleanText":"fix login bug"}`,
-    messages: [{ role: 'user', content: text }],
-  })
+  // Helper: strip deadline prepositions + the matched phrase
+  const strip = (re: RegExp) =>
+    text.replace(new RegExp(`(?:(?:by|due|until|before)\\s+)?${re.source}`, 'gi'), '')
+      .replace(/\s{2,}/g, ' ').trim()
 
-  const raw = (response.content[0] as { type: string; text: string }).text.trim()
+  // ── today / tonight ──────────────────────────────────────────────────────
+  if (/\b(today|tonight)\b/.test(lower)) {
+    return { dueDate: todayStr, cleanText: strip(/today|tonight/) }
+  }
+
+  // ── tomorrow ─────────────────────────────────────────────────────────────
+  if (/\btomorrow\b/.test(lower)) {
+    const d = new Date(base); d.setDate(d.getDate() + 1)
+    return { dueDate: d.toISOString().split('T')[0], cleanText: strip(/tomorrow/) }
+  }
+
+  // ── "in N days" ──────────────────────────────────────────────────────────
+  const inDays = lower.match(/\bin\s+(\d+)\s+days?\b/)
+  if (inDays) {
+    const d = new Date(base); d.setDate(d.getDate() + parseInt(inDays[1]))
+    return {
+      dueDate: d.toISOString().split('T')[0],
+      cleanText: text.replace(/\bin\s+\d+\s+days?\b/gi, '').replace(/\s{2,}/g, ' ').trim(),
+    }
+  }
+
+  // ── next week ────────────────────────────────────────────────────────────
+  if (/\bnext\s+week\b/.test(lower)) {
+    const d = new Date(base); d.setDate(d.getDate() + 7)
+    return { dueDate: d.toISOString().split('T')[0], cleanText: strip(/next\s+week/) }
+  }
+
+  // ── weekday names (next occurrence) ──────────────────────────────────────
+  for (let i = 0; i < DAY_NAMES.length; i++) {
+    if (new RegExp(`\\b${DAY_NAMES[i]}\\b`).test(lower)) {
+      const d = new Date(base)
+      let diff = i - d.getDay()
+      if (diff <= 0) diff += 7
+      d.setDate(d.getDate() + diff)
+      return {
+        dueDate: d.toISOString().split('T')[0],
+        cleanText: strip(new RegExp(DAY_NAMES[i])),
+      }
+    }
+  }
+
+  // ── Claude fallback for complex patterns (e.g. "April 20", "end of month") ─
   try {
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 80,
+      system: `Today is ${todayStr}.
+Extract any deadline from the text. Return ONLY a JSON object:
+- "dueDate": YYYY-MM-DD format, or null
+- "cleanText": text with the deadline phrase removed (trimmed)
+Return ONLY raw JSON, no markdown.`,
+      messages: [{ role: 'user', content: text }],
+    })
+    const raw = (response.content[0] as { type: string; text: string }).text.trim()
     const parsed = JSON.parse(raw)
     const dueDate = typeof parsed.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.dueDate)
-      ? parsed.dueDate
-      : null
+      ? parsed.dueDate : null
     const cleanText = typeof parsed.cleanText === 'string' && parsed.cleanText.trim()
-      ? parsed.cleanText.trim()
-      : text
+      ? parsed.cleanText.trim() : text
     return { dueDate, cleanText }
   } catch {
     return { dueDate: null, cleanText: text }

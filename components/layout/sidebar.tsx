@@ -45,8 +45,8 @@ type DeadlineTask = Pick<Task, 'id' | 'task_number' | 'title' | 'due_date' | 'pr
 function relativeDue(due: string): { label: string; color: string } {
   const d = parseISO(due)
   if (isPast(d) && !isToday(d)) return { label: 'overdue', color: '#ff4444' }
-  if (isToday(d))              return { label: 'today',   color: '#f97316' }
-  if (isTomorrow(d))           return { label: 'tomorrow', color: '#eab308' }
+  if (isToday(d))               return { label: 'today',   color: '#f97316' }
+  if (isTomorrow(d))            return { label: 'tomorrow', color: '#eab308' }
   const days = differenceInDays(d, new Date())
   return { label: `${days}d`, color: days <= 3 ? '#eab308' : 'var(--muted-foreground)' }
 }
@@ -56,14 +56,18 @@ export function Sidebar() {
   const router    = useRouter()
   const supabase  = createClient()
 
-  const [camps, setCamps]                   = useState<CodeCamp[]>([])
-  const [campsOpen, setCampsOpen]           = useState(true)
-  const [loggingOut, setLoggingOut]         = useState(false)
-  const [syncing, setSyncing]               = useState(false)
-  const [now, setNow]                       = useState<Date | null>(null)
-  const [deadlineTasks, setDeadlineTasks]   = useState<DeadlineTask[]>([])
+  const [camps, setCamps]                 = useState<CodeCamp[]>([])
+  const [campsOpen, setCampsOpen]         = useState(true)
+  const [loggingOut, setLoggingOut]       = useState(false)
+  const [syncing, setSyncing]             = useState(false)
+  const [now, setNow]                     = useState<Date | null>(null)
+  const [deadlineTasks, setDeadlineTasks] = useState<DeadlineTask[]>([])
 
-  useEffect(() => { fetchCamps(); fetchDeadlines(); moveOverdueTasks() }, [])
+  useEffect(() => {
+    fetchCamps()
+    fetchDeadlines()
+    moveOverdueTasks()
+  }, [])
 
   useEffect(() => {
     setNow(new Date())
@@ -79,13 +83,6 @@ export function Sidebar() {
     ? now.toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', weekday: 'short', month: 'short', day: 'numeric' })
     : '---'
 
-  const q2Deadline = now
-    ? (() => {
-        const d = new Date(now.toLocaleString('en-PH', { timeZone: 'Asia/Manila' }))
-        return new Date(d.getFullYear(), 5, 30).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })
-      })()
-    : 'Jun 30'
-
   async function moveOverdueTasks() {
     const today = new Date().toISOString().split('T')[0]
     await supabase
@@ -100,13 +97,12 @@ export function Sidebar() {
     today.setHours(0, 0, 0, 0)
     const in7days = new Date(today)
     in7days.setDate(today.getDate() + 7)
-    const in7Str = in7days.toISOString().split('T')[0]
 
     const { data } = await supabase
       .from('tasks')
       .select('id, task_number, title, due_date, priority, assigned_to, camp_id, status')
       .not('due_date', 'is', null)
-      .lte('due_date', in7Str)
+      .lte('due_date', in7days.toISOString().split('T')[0])
       .neq('status', 'done')
       .order('due_date', { ascending: true })
       .limit(8)
@@ -288,24 +284,63 @@ export function Sidebar() {
               </div>
             )}
           </div>
+        </ScrollArea>
 
-          {/* ── Near Deadlines ────────────────────── */}
-          {deadlineTasks.length > 0 && (
-            <div className="px-3 mt-6">
-              <div className="mono-tag px-3 py-2 mb-1" style={{ justifyContent: 'space-between' }}>
-                <span className="flex items-center gap-1.5">
-                  <Clock className="h-3 w-3" />
-                  Near Deadlines
-                </span>
-                <span
-                  className="text-[9px] tabular-nums"
-                  style={{ fontFamily: 'var(--font-jetbrains-mono)', color: 'var(--muted-foreground)' }}
-                >
+        {/* ── Bottom card: Manila Clock + Near Deadlines ─────────────── */}
+        <div
+          className="mx-3 mb-3 rounded-2xl px-4 py-3 shrink-0"
+          style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}
+        >
+          {/* Clock header */}
+          <div className="mono-tag mb-1.5" style={{ color: 'var(--muted-foreground)' }}>
+            <span className="lime-dot" />
+            <span>Manila · PHT</span>
+          </div>
+
+          {/* Time */}
+          <p
+            className="text-2xl font-bold tabular-nums text-foreground leading-none tracking-tight"
+            style={{ fontFamily: 'var(--font-jetbrains-mono)' }}
+          >
+            {manilaTime}
+          </p>
+
+          {/* Date */}
+          <p
+            className="mt-1.5 text-[10px] text-muted-foreground"
+            style={{ fontFamily: 'var(--font-jetbrains-mono)', textTransform: 'uppercase', letterSpacing: '0.1em' }}
+          >
+            {manilaDate}
+          </p>
+
+          {/* ── Near Deadlines (replaces Q2 line) ──────────────────── */}
+          <div
+            className="mt-2.5 pt-2.5"
+            style={{ borderTop: '1px solid var(--glass-border)' }}
+          >
+            {/* Deadlines header */}
+            <div className="mono-tag mb-1.5" style={{ justifyContent: 'space-between', color: 'var(--muted-foreground)' }}>
+              <span className="flex items-center gap-1">
+                <Clock className="h-2.5 w-2.5" />
+                Near Deadlines
+              </span>
+              {deadlineTasks.length > 0 && (
+                <span style={{ fontFamily: 'var(--font-jetbrains-mono)', fontSize: '9px' }}>
                   {deadlineTasks.length}
                 </span>
-              </div>
+              )}
+            </div>
 
-              <div className="space-y-0.5">
+            {/* Task rows */}
+            {deadlineTasks.length === 0 ? (
+              <p
+                className="text-[10px] text-muted-foreground/50 mb-1"
+                style={{ fontFamily: 'var(--font-jetbrains-mono)' }}
+              >
+                No deadlines this week
+              </p>
+            ) : (
+              <div className="space-y-0.5 mb-1">
                 {deadlineTasks.map(task => {
                   const due = relativeDue(task.due_date!)
                   const href = task.camp_id
@@ -320,8 +355,7 @@ export function Sidebar() {
                         onClick={() => router.push(href)}
                       >
                         <div
-                          className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs cursor-pointer transition-all text-muted-foreground hover:text-foreground"
-                          style={{ background: 'transparent' }}
+                          className="flex items-center gap-1.5 px-1.5 py-0.5 rounded-lg cursor-pointer transition-all text-muted-foreground hover:text-foreground"
                           onMouseEnter={e => {
                             (e.currentTarget as HTMLDivElement).style.background = 'var(--sidebar-accent)'
                           }}
@@ -330,66 +364,38 @@ export function Sidebar() {
                           }}
                         >
                           {isOverdue && (
-                            <AlertTriangle className="h-3 w-3 shrink-0" style={{ color: due.color }} />
+                            <AlertTriangle className="h-2.5 w-2.5 shrink-0" style={{ color: due.color }} />
                           )}
                           <span
-                            className="truncate flex-1"
+                            className="truncate flex-1 text-[10px]"
                             style={{ fontFamily: 'var(--font-space-grotesk)' }}
                           >
                             {taskCode(task)} {task.title}
                           </span>
                           <span
-                            className="shrink-0 text-[10px] font-semibold tabular-nums"
+                            className="shrink-0 text-[9px] font-semibold tabular-nums"
                             style={{ fontFamily: 'var(--font-jetbrains-mono)', color: due.color }}
                           >
                             {due.label}
                           </span>
                         </div>
                       </TooltipTrigger>
-                      <TooltipContent
-                        side="right"
-                        className="max-w-56 p-3"
-                        style={{
-                          background: 'var(--sidebar)',
-                          border: '1px solid var(--sidebar-border)',
-                          borderRadius: '12px',
-                        }}
-                      >
-                        <div className="space-y-1.5">
-                          <p
-                            className="text-xs font-semibold text-foreground leading-snug"
-                            style={{ fontFamily: 'var(--font-space-grotesk)' }}
-                          >
-                            {task.title}
-                          </p>
-                          <p
-                            className="text-[10px]"
-                            style={{ fontFamily: 'var(--font-jetbrains-mono)', color: 'var(--muted-foreground)' }}
-                          >
+
+                      <TooltipContent side="right" sideOffset={8}>
+                        <div className="space-y-1">
+                          <p className="font-semibold text-xs leading-snug">{task.title}</p>
+                          <p className="opacity-60 text-[10px]" style={{ fontFamily: 'var(--font-jetbrains-mono)' }}>
                             {taskCode(task)}
                           </p>
-                          <div className="flex flex-col gap-1 pt-0.5">
-                            <span
-                              className="text-[10px]"
-                              style={{ fontFamily: 'var(--font-jetbrains-mono)', color: due.color }}
-                            >
+                          <div className="flex flex-col gap-0.5 pt-0.5">
+                            <span className="text-[10px]" style={{ color: due.color }}>
                               📅 {task.due_date ? format(parseISO(task.due_date), 'MMM d, yyyy') : '—'}
-                              {isOverdue && ' · OVERDUE'}
+                              {isOverdue ? ' · OVERDUE' : ''}
                             </span>
                             {task.assigned_to && (
-                              <span
-                                className="text-[10px] text-muted-foreground"
-                                style={{ fontFamily: 'var(--font-jetbrains-mono)' }}
-                              >
-                                👤 {task.assigned_to}
-                              </span>
+                              <span className="text-[10px] opacity-70">👤 {task.assigned_to}</span>
                             )}
-                            <span
-                              className="text-[10px] text-muted-foreground capitalize"
-                              style={{ fontFamily: 'var(--font-jetbrains-mono)' }}
-                            >
-                              ⚡ {task.priority}
-                            </span>
+                            <span className="text-[10px] capitalize opacity-70">⚡ {task.priority}</span>
                           </div>
                         </div>
                       </TooltipContent>
@@ -397,50 +403,14 @@ export function Sidebar() {
                   )
                 })}
               </div>
-            </div>
-          )}
-        </ScrollArea>
-
-        {/* ── Manila Clock ──────────────────────────── */}
-        <div
-          className="mx-3 mb-3 rounded-2xl px-4 py-3"
-          style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}
-        >
-          <div className="mono-tag mb-1.5" style={{ color: 'var(--muted-foreground)' }}>
-            <span className="lime-dot" />
-            <span>Manila · PHT</span>
+            )}
           </div>
 
-          <p
-            className="text-2xl font-bold tabular-nums text-foreground leading-none tracking-tight"
-            style={{ fontFamily: 'var(--font-jetbrains-mono)' }}
-          >
-            {manilaTime}
-          </p>
-
-          <p
-            className="mt-1.5 text-[10px] text-muted-foreground"
-            style={{ fontFamily: 'var(--font-jetbrains-mono)', textTransform: 'uppercase', letterSpacing: '0.1em' }}
-          >
-            {manilaDate}
-          </p>
-
-          <p
-            className="text-[10px] font-semibold"
-            style={{
-              fontFamily: 'var(--font-jetbrains-mono)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.1em',
-              color: 'var(--devcon-orange)',
-            }}
-          >
-            Q2 ends {q2Deadline}
-          </p>
-
+          {/* Sync button */}
           <button
             onClick={handleSync}
             disabled={syncing}
-            className="mt-3 w-full flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-[10px] font-semibold transition-all disabled:opacity-40"
+            className="mt-2 w-full flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-[10px] font-semibold transition-all disabled:opacity-40"
             style={{
               fontFamily: 'var(--font-jetbrains-mono)',
               textTransform: 'uppercase',
