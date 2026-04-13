@@ -232,6 +232,43 @@ Return ONLY raw JSON, no markdown.`,
   }
 }
 
+// ── cleanTaskTitle ────────────────────────────────────────────────────────────
+/**
+ * Given raw task text (already stripped of bot username and @assignee mentions),
+ * use Claude to extract a clean title, priority level, and due date — stripping
+ * all meta-phrases (priority words, deadline phrases, the word "priority", etc.)
+ */
+export async function cleanTaskTitle(text: string): Promise<{
+  title: string
+  priority: 'low' | 'medium' | 'high' | 'urgent'
+  dueDate: string | null
+}> {
+  const today = new Date().toISOString().split('T')[0]
+  try {
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 120,
+      system: `Today is ${today}.
+You extract task metadata from raw task text.
+Return ONLY a JSON object with these fields:
+- "title": the clean task title. Strip ALL of the following from it: priority words (low/medium/high/urgent), the word "priority" itself, deadline phrases (today/tomorrow/by Friday/until Monday/in 3 days/etc), prepositions left dangling after stripping (by/until/for/on/at/before). Keep only the core action.
+- "priority": one of low|medium|high|urgent — inferred from words like "urgent", "high priority", "ASAP", "low". Default "medium".
+- "dueDate": YYYY-MM-DD if a deadline is mentioned, else null.
+Return ONLY raw JSON, no markdown.`,
+      messages: [{ role: 'user', content: text }],
+    })
+    const raw = (response.content[0] as { type: string; text: string }).text.trim()
+    const parsed = JSON.parse(raw)
+    return {
+      title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : text,
+      priority: ['low', 'medium', 'high', 'urgent'].includes(parsed.priority) ? parsed.priority : 'medium',
+      dueDate: typeof parsed.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.dueDate) ? parsed.dueDate : null,
+    }
+  } catch {
+    return { title: text, priority: 'medium', dueDate: null }
+  }
+}
+
 // ── ParsedIntent ──────────────────────────────────────────────────────────────
 export type ParsedIntent =
   | { intent: 'addtask'; title: string; priority?: string; campName?: string; assignedTo?: string; dueDate?: string | null }

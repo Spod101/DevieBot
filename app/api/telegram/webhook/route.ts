@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { generateStandupMessage, sendTelegramMessage } from '@/lib/standup'
-import { parseBulkTasks, parseBulkUpdates, parseMessage, parseStatus, extractDueDate, DEADLINE_KEYWORDS } from '@/lib/nlp'
+import { parseBulkTasks, parseBulkUpdates, parseMessage, parseStatus, extractDueDate, DEADLINE_KEYWORDS, cleanTaskTitle } from '@/lib/nlp'
 import type { TaskStatus } from '@/types/database'
 
 /** Returns a due date 7 days from today (ISO YYYY-MM-DD) */
@@ -608,68 +608,46 @@ export async function POST(request: Request) {
           return NextResponse.json({ ok: true })
         }
 
-        // Simple title (no flags, no @, no commas) → check trailing name then insert
+        // Simple title (no flags, no @, no commas) → NLP-clean then insert
         const isSimple = !rawRest.includes('--') && mentionsInRest.length === 0 && !rawRest.includes(',')
         if (isSimple) {
-          // Extract deadline if keywords present, then strip it from the title
-          let simpleText = rest
-          let simpleDueDate: string | null = null
-          if (DEADLINE_KEYWORDS.test(rest)) {
-            const extracted = await extractDueDate(rest)
-            simpleDueDate = extracted.dueDate
-            simpleText = extracted.cleanText || rest
-          }
-          // Try to detect a member name at the end of the title (e.g. "Fix bug David")
-          const { title: parsedTitle, assignee } = await resolveAssigneeByName(simpleText, supabase)
-          const finalTitle = parsedTitle || simpleText
-          const due = simpleDueDate ?? defaultDueDate()
+          const cleaned = await cleanTaskTitle(rest)
+          const { title: parsedTitle, assignee } = await resolveAssigneeByName(cleaned.title, supabase)
+          const finalTitle = parsedTitle || cleaned.title
+          const due = cleaned.dueDate ?? defaultDueDate()
           const { data: task, error } = await supabase
             .from('tasks')
-            .insert({ title: finalTitle, status: 'todo', priority: 'medium', order_index: 0, assigned_to: assignee, due_date: due })
+            .insert({ title: finalTitle, status: 'todo', priority: cleaned.priority, order_index: 0, assigned_to: assignee, due_date: due })
             .select().single()
           if (error || !task) {
             await reply('❌ Failed to create task.')
           } else {
-            await reply(taskAddedMsg({ ...task, priority: 'medium', due_date: due, assigned_to: assignee }))
+            await reply(taskAddedMsg({ ...task, priority: cleaned.priority, due_date: due, assigned_to: assignee }))
           }
           return NextResponse.json({ ok: true })
         }
 
-        // Single @mention (no flags, no commas) → parse directly without NLP
+        // Single @mention (no flags, no commas) → NLP-clean then insert
         const hasSingleMention = mentionsInRest.length === 1 && !rawRest.includes('--') && !rawRest.includes(',')
         if (hasSingleMention) {
           const username = mentionsInRest[0][1].toLowerCase()
-          // Resolve @username → member name (the canonical assigned_to value)
           const assignedName = await resolveName(username, supabase)
-          // Strip the @mention from the raw text to get the title
-          let titleRaw = rawRest.replace(/@\w+/g, '').replace(/\s+/g, ' ').trim()
-          // Extract optional priority keyword
-          let priority = 'medium'
-          const priorityMatch = titleRaw.match(/\b(urgent|high|low|medium)\b/i)
-          if (priorityMatch) {
-            priority = priorityMatch[1].toLowerCase()
-            titleRaw = titleRaw.replace(priorityMatch[0], '').replace(/\s+/g, ' ').trim()
-          }
-          // Extract deadline if keywords present
-          let mentionDueDate: string | null = null
-          if (DEADLINE_KEYWORDS.test(titleRaw)) {
-            const extracted = await extractDueDate(titleRaw)
-            mentionDueDate = extracted.dueDate
-            titleRaw = extracted.cleanText || titleRaw
-          }
-          if (!titleRaw) {
+          // Strip the @mention then let NLP clean the rest
+          const withoutMention = rawRest.replace(/@\w+/g, '').replace(/\s+/g, ' ').trim()
+          const cleaned = await cleanTaskTitle(withoutMention)
+          if (!cleaned.title) {
             await reply('❌ Task title cannot be empty.')
             return NextResponse.json({ ok: true })
           }
-          const due = mentionDueDate ?? defaultDueDate()
+          const due = cleaned.dueDate ?? defaultDueDate()
           const { data: task, error } = await supabase
             .from('tasks')
-            .insert({ title: titleRaw, status: 'todo', priority, order_index: 0, assigned_to: assignedName, due_date: due })
+            .insert({ title: cleaned.title, status: 'todo', priority: cleaned.priority, order_index: 0, assigned_to: assignedName, due_date: due })
             .select().single()
           if (error || !task) {
             await reply('❌ Failed to create task.')
           } else {
-            await reply(taskAddedMsg({ ...task, priority, due_date: due, assigned_to: assignedName }))
+            await reply(taskAddedMsg({ ...task, priority: cleaned.priority, due_date: due, assigned_to: assignedName }))
           }
           return NextResponse.json({ ok: true })
         }
