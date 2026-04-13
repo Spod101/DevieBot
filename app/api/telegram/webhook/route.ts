@@ -520,9 +520,10 @@ export async function POST(request: Request) {
         const mentionsInRest = [...rawRest.matchAll(/@(\w+)/g)]
         const hasMultipleMentions = mentionsInRest.length > 1
         const hasNewlines = rawRest.includes('\n')
+        const hasGroupedSegments = /(?:Action\s*Plan|Note|Task|Update)\s*:|;\s+|\n\s*\n/i.test(rawRest)
 
         // Bulk text pasted after /addtask → hand off to bulk parser
-        if (hasMultipleMentions || hasNewlines) {
+        if (hasMultipleMentions || hasNewlines || hasGroupedSegments) {
           const parsed = await parseBulkTasks(rawRest)
           if (parsed.length === 0) {
             await reply('❌ Could not extract tasks from that text.')
@@ -531,7 +532,7 @@ export async function POST(request: Request) {
           const inserts = parsed.map(t => ({
             title: t.title, status: 'todo' as TaskStatus,
             priority: t.priority, order_index: 0,
-            assigned_to: t.assignee, camp_id: null,
+            assigned_to: t.assignee === 'unassigned' ? null : t.assignee, camp_id: null,
             due_date: validDate(t.dueDate) ?? defaultDueDate(),
             description: t.description ?? null,
           }))
@@ -693,7 +694,7 @@ export async function POST(request: Request) {
         status: 'todo' as TaskStatus,
         priority: t.priority,
         order_index: 0,
-        assigned_to: t.assignee,
+        assigned_to: t.assignee === 'unassigned' ? null : t.assignee,
         camp_id: null,
         due_date: validDate(t.dueDate) ?? defaultDueDate(),
         description: t.description ?? null,

@@ -12,6 +12,179 @@ export type BulkTask = {
   dueDate?: string | null       // ISO date YYYY-MM-DD
 }
 
+function pickAssigneeFromText(text: string): string | null {
+  const mentions = [...text.matchAll(/@(\w+)/g)].map(m => m[1].toLowerCase())
+  if (mentions.length === 0) return null
+
+  const filtered = mentions.filter(m => !['deviethebot', 'deviebot', 'bot'].includes(m))
+  const source = filtered.length > 0 ? filtered : mentions
+  return source[source.length - 1] ?? null
+}
+
+function appendDescription(base: string | null | undefined, extra: string): string {
+  if (!base) return extra
+  return `${base}\n${extra}`
+}
+
+function foldContextNotes(tasks: Array<BulkTask & { _isContextNote?: boolean }>): BulkTask[] {
+  const folded: BulkTask[] = []
+  for (const task of tasks) {
+    if (task._isContextNote && folded.length > 0) {
+      const prev = folded[folded.length - 1]
+      if (prev.assignee === task.assignee) {
+        const noteBody = task.description ?? task.title
+        prev.description = appendDescription(prev.description, noteBody)
+        continue
+      }
+    }
+
+    const { _isContextNote, ...clean } = task
+    folded.push(clean)
+  }
+  return folded
+}
+
+function parseJsonArrayFromModel(raw: string): unknown[] | null {
+  const trimmed = raw.trim()
+
+  const attempts = [
+    trimmed,
+    // Handle fenced markdown blocks.
+    trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim(),
+  ]
+
+  for (const candidate of attempts) {
+    try {
+      const parsed = JSON.parse(candidate)
+      if (Array.isArray(parsed)) return parsed
+    } catch {
+      // Keep trying other extraction paths.
+    }
+  }
+
+  // Last resort: grab the first JSON array-looking slice.
+  const start = trimmed.indexOf('[')
+  const end = trimmed.lastIndexOf(']')
+  if (start >= 0 && end > start) {
+    const slice = trimmed.slice(start, end + 1)
+    try {
+      const parsed = JSON.parse(slice)
+      if (Array.isArray(parsed)) return parsed
+    } catch {
+      return null
+    }
+  }
+
+  return null
+}
+
+function inferPriority(text: string): 'low' | 'medium' | 'high' | 'urgent' {
+  const lower = text.toLowerCase()
+  if (/\b(urgent|asap|immediately|critical|p0|p1)\b/.test(lower)) return 'urgent'
+  if (/\b(high\s+priority|high|important|priority\s*1)\b/.test(lower)) return 'high'
+  if (/\b(low\s+priority|low|whenever|nice\s+to\s+have)\b/.test(lower)) return 'low'
+  return 'medium'
+}
+
+function sanitizeBulkTask(item: unknown, fallbackAssignee: string | null): BulkTask | null {
+  if (!item || typeof item !== 'object') return null
+  const record = item as Record<string, unknown>
+
+  const rawTitle = typeof record.title === 'string' ? record.title.trim() : ''
+  if (!rawTitle) return null
+
+  const rawAssignee = typeof record.assignee === 'string' ? record.assignee.trim().toLowerCase() : ''
+  const assignee = (rawAssignee || fallbackAssignee || '').trim()
+  if (!assignee) return null
+
+  const rawPriority = typeof record.priority === 'string' ? record.priority.toLowerCase() : ''
+  const priority: BulkTask['priority'] = ['low', 'medium', 'high', 'urgent'].includes(rawPriority)
+    ? rawPriority as BulkTask['priority']
+    : inferPriority(rawTitle)
+
+  const dueDate = typeof record.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(record.dueDate)
+    ? record.dueDate
+    : null
+
+  const description = typeof record.description === 'string' && record.description.trim()
+    ? record.description.trim()
+    : null
+
+  const title = rawTitle
+    .replace(/^(action\s*plan|note|fyi|task|update)\s*:\s*/i, '')
+    .trim()
+
+  if (!title) return null
+
+  return { assignee, title, description, priority, dueDate }
+}
+
+function sanitizeBulkTaskWithContext(item: unknown, fallbackAssignee: string | null): (BulkTask & { _isContextNote?: boolean }) | null {
+  if (!item || typeof item !== 'object') return null
+  const record = item as Record<string, unknown>
+  const rawTitle = typeof record.title === 'string' ? record.title.trim() : ''
+  const isContextNote = /^\s*(note|fyi)\s*:/i.test(rawTitle)
+  const normalized = sanitizeBulkTask(item, fallbackAssignee)
+  if (!normalized) return null
+  if (isContextNote) return { ...normalized, _isContextNote: true }
+  return normalized
+}
+
+async function parseBulkTasksHeuristic(message: string): Promise<BulkTask[]> {
+  const fallbackAssignee = pickAssigneeFromText(message) ?? 'unassigned'
+
+  const withoutCmd = message
+    .replace(/^\s*\/addtask(?:@\w+)?\s*/i, '')
+    .replace(/@\w+/, '')
+    .trim()
+
+  const chunked = withoutCmd
+    .split(/\n\s*\n+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+
+  const paragraphs = chunked.length > 1
+    ? chunked
+    : withoutCmd
+      .split(/(?=(?:^|\s)(?:Action\s*Plan|Note|FYI|Task|Update)\s*:)/i)
+      .map(s => s.trim())
+      .filter(Boolean)
+
+  const tasks: Array<BulkTask & { _isContextNote?: boolean }> = []
+  for (const paragraph of paragraphs) {
+    const isContextNote = /^\s*(note|fyi)\s*:/i.test(paragraph)
+    const cleaned = paragraph
+      .replace(/^[-*•\d.)\s]+/, '')
+      .replace(/^(action\s*plan|note|fyi|task|update)\s*:\s*/i, '')
+      .trim()
+    if (!cleaned) continue
+
+    const { dueDate, cleanText } = await extractDueDate(cleaned)
+    const normalized = cleanText.trim()
+    if (!normalized) continue
+
+    const sentenceSplit = normalized.split(/(?<=[.!?])\s+/).filter(Boolean)
+    const titleRaw = (sentenceSplit[0] ?? normalized).replace(/[.!?]+$/, '').trim()
+    const title = titleRaw.length > 70 ? `${titleRaw.slice(0, 67).trim()}...` : titleRaw
+    if (!title) continue
+
+    const description = sentenceSplit.length > 1
+      ? sentenceSplit.slice(1).join(' ').trim()
+      : null
+
+    tasks.push({
+      assignee: fallbackAssignee,
+      title,
+      description,
+      priority: inferPriority(normalized),
+      dueDate,
+      _isContextNote: isContextNote,
+    })
+  }
+
+  return foldContextNotes(tasks)
+}
+
 export async function parseBulkTasks(message: string): Promise<BulkTask[]> {
   const today = new Date().toISOString().split('T')[0]
   const systemPrompt = `You are a task extractor for a project management bot.
@@ -60,14 +233,17 @@ Example output:
   })
 
   const raw = (response.content[0] as { type: string; text: string }).text.trim()
-
-  try {
-    const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) return parsed as BulkTask[]
-    return []
-  } catch {
-    return []
+  const fallbackAssignee = pickAssigneeFromText(message) ?? 'unassigned'
+  const parsed = parseJsonArrayFromModel(raw)
+  if (parsed) {
+    const normalized = parsed
+      .map(item => sanitizeBulkTaskWithContext(item, fallbackAssignee))
+      .filter((task): task is (BulkTask & { _isContextNote?: boolean }) => task !== null)
+    const folded = foldContextNotes(normalized)
+    if (folded.length > 0) return folded
   }
+
+  return parseBulkTasksHeuristic(message)
 }
 
 // ── BulkUpdate ────────────────────────────────────────────────────────────────
