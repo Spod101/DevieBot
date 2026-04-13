@@ -7,7 +7,6 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Task } from '@/types/database'
 import { cn } from '@/lib/utils'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Tooltip,
   TooltipContent,
@@ -159,8 +158,8 @@ export function Sidebar() {
 
       <aside
         className={cn(
-          'flex flex-col w-64 h-screen shrink-0',
-          'fixed md:sticky top-0 z-50 md:z-auto',
+          'flex flex-col w-[86vw] max-w-[18rem] md:w-64 shrink-0',
+          'fixed md:sticky top-14 md:top-0 h-[calc(100dvh-3.5rem)] md:h-screen z-50 md:z-auto',
           'transition-transform duration-300 ease-in-out',
           mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
         )}
@@ -223,7 +222,7 @@ export function Sidebar() {
         </div>
 
         {/* ── Navigation ────────────────────────────── */}
-        <ScrollArea className="flex-1 py-4 styled-scroll">
+        <div className="flex-1 min-h-0 overflow-y-auto py-4 styled-scroll">
           <nav className="px-3 space-y-0.5">
             {navItems.map(({ href, label, icon: Icon }) => {
               const active = href === '/dashboard'
@@ -255,8 +254,7 @@ export function Sidebar() {
               )
             })}
           </nav>
-
-        </ScrollArea>
+        </div>
 
         {/* ── Bottom card: Manila Clock + Near Deadlines ─────────────── */}
         <div

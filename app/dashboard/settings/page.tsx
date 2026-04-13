@@ -196,7 +196,6 @@ export default function SettingsPage() {
       .update({
         chat_id:         config.chat_id,
         bot_token:       config.bot_token,
-        standup_time:    config.standup_time,
         standup_enabled: config.standup_enabled,
       })
       .eq('id', config.id)
@@ -417,16 +416,6 @@ export default function SettingsPage() {
               />
             </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Time (Manila / PHT)</Label>
-              <Input
-                type="time"
-                value={config.standup_time}
-                onChange={e => setConfig({ ...config, standup_time: e.target.value })}
-                className="w-full sm:w-36"
-              />
-            </div>
-
             <Divider />
 
             <div className="flex gap-2">
@@ -497,7 +486,7 @@ export default function SettingsPage() {
               </div>
 
               <div
-                className="p-3 space-y-1.5 min-h-[56px] max-h-48 overflow-y-auto styled-scroll"
+                className="p-3 space-y-1.5 min-h-14 max-h-48 overflow-y-auto styled-scroll"
                 style={{ fontFamily: 'var(--font-jetbrains-mono)' }}
               >
                 {logs.length === 0 ? (
