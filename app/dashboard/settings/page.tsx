@@ -147,7 +147,7 @@ export default function SettingsPage() {
     if (!config?.bot_token) { toast.error('Save your bot token first'); return }
     setRegisteringWebhook(true)
     try {
-      const res  = await fetch('/api/telegram/webhook', { method: 'POST' })
+      const res  = await fetch('/api/telegram/register', { method: 'POST' })
       const data = await res.json()
       if (data.ok) {
         toast.success('Webhook registered!')
