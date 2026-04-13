@@ -28,6 +28,8 @@ import {
   Users,
   Clock,
   AlertTriangle,
+  Menu,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format, differenceInDays, isToday, isTomorrow, isPast, parseISO } from 'date-fns'
@@ -62,6 +64,7 @@ export function Sidebar() {
   const [syncing, setSyncing]             = useState(false)
   const [now, setNow]                     = useState<Date | null>(null)
   const [deadlineTasks, setDeadlineTasks] = useState<DeadlineTask[]>([])
+  const [mobileOpen, setMobileOpen]       = useState(false)
 
   useEffect(() => {
     fetchCamps()
@@ -143,8 +146,47 @@ export function Sidebar() {
 
   return (
     <TooltipProvider delay={200}>
+
+      {/* ── Mobile top bar (hamburger) ─────────────────────────────── */}
+      <div
+        className="md:hidden fixed top-0 left-0 right-0 z-40 h-14 flex items-center gap-3 px-4 shrink-0"
+        style={{ background: 'var(--sidebar)', borderBottom: '1px solid var(--sidebar-border)' }}
+      >
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground transition-colors"
+          style={{ background: 'var(--sidebar-accent)' }}
+        >
+          <Menu className="h-4 w-4" />
+        </button>
+        <div
+          className="h-8 w-8 rounded-xl overflow-hidden shrink-0"
+          style={{ background: 'linear-gradient(135deg, var(--primary) 0%, var(--devcon-sky) 100%)' }}
+        >
+          <Image src="/icons/icon.png" alt="DEVCON 16" width={32} height={32} className="w-full h-full object-cover" />
+        </div>
+        <span className="font-bold text-sm text-foreground" style={{ fontFamily: 'var(--font-space-grotesk)' }}>Devie</span>
+        <div className="ml-auto mono-tag">
+          <span className="lime-dot" />
+          <span>Live</span>
+        </div>
+      </div>
+
+      {/* ── Mobile backdrop ───────────────────────────────────────────── */}
+      {mobileOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
       <aside
-        className="flex flex-col w-64 h-screen sticky top-0 shrink-0"
+        className={cn(
+          'flex flex-col w-64 h-screen shrink-0',
+          'fixed md:sticky top-0 z-50 md:z-auto',
+          'transition-transform duration-300 ease-in-out',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+        )}
         style={{
           background: 'var(--sidebar)',
           backdropFilter: 'blur(20px)',
@@ -170,7 +212,6 @@ export function Sidebar() {
               width={40}
               height={40}
               className="w-full h-full object-cover"
-              style={{  }}
             />
           </div>
 
@@ -189,9 +230,18 @@ export function Sidebar() {
             </span>
           </div>
 
-          <div className="ml-auto mono-tag">
-            <span className="lime-dot" />
-            <span>Live</span>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="mono-tag">
+              <span className="lime-dot" />
+              <span>Live</span>
+            </div>
+            {/* Close button — mobile only */}
+            <button
+              onClick={() => setMobileOpen(false)}
+              className="md:hidden h-6 w-6 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
 
@@ -203,7 +253,7 @@ export function Sidebar() {
                 ? pathname === '/dashboard'
                 : pathname.startsWith(href)
               return (
-                <Link key={href} href={href}>
+                <Link key={href} href={href} onClick={() => setMobileOpen(false)}>
                   <div
                     className={cn(
                       'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer',
@@ -249,7 +299,7 @@ export function Sidebar() {
                   const active = pathname === `/dashboard/camps/${camp.id}`
                   const dot    = campStatusColor[camp.status] ?? 'var(--muted-foreground)'
                   return (
-                    <Link key={camp.id} href={`/dashboard/camps/${camp.id}`}>
+                    <Link key={camp.id} href={`/dashboard/camps/${camp.id}`} onClick={() => setMobileOpen(false)}>
                       <div
                         className={cn(
                           'flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs cursor-pointer transition-all',
@@ -275,7 +325,7 @@ export function Sidebar() {
                   )
                 })}
 
-                <Link href="/dashboard/camps">
+                <Link href="/dashboard/camps" onClick={() => setMobileOpen(false)}>
                   <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-muted-foreground hover:text-foreground cursor-pointer transition-colors">
                     <Plus className="h-3.5 w-3.5" />
                     <span style={{ fontFamily: 'var(--font-space-grotesk)' }}>New Camp</span>

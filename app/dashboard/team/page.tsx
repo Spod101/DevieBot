@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useMembers } from '@/hooks/use-members'
 import { memberColor, memberLabel, memberInitials } from '@/lib/member-utils'
-import { Loader2, Trash2, MessageCircle, Users, AtSign, UserX } from 'lucide-react'
+import { Loader2, Trash2, MessageCircle, Users, UserPlus, CalendarDays } from 'lucide-react'
 import { format } from 'date-fns'
 
 export default function TeamPage() {
@@ -16,8 +16,11 @@ export default function TeamPage() {
     setDeletingId(null)
   }
 
-  const withUsername    = members.filter(m => m.telegram_username)
-  const withoutUsername = members.filter(m => !m.telegram_username)
+  const now          = new Date()
+  const startOfWeek  = new Date(now); startOfWeek.setDate(now.getDate() - 7); startOfWeek.setHours(0, 0, 0, 0)
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+  const newThisWeek  = members.filter(m => m.created_at && new Date(m.created_at) >= startOfWeek)
+  const newThisMonth = members.filter(m => m.created_at && new Date(m.created_at) >= startOfMonth)
 
   return (
     <div className="p-6 space-y-6">
@@ -36,11 +39,11 @@ export default function TeamPage() {
 
       {/* ── Stats row ──────────────────────────────────────────── */}
       {!loading && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
-            { icon: Users,  label: 'Total Members',    value: members.length,         color: 'var(--primary)' },
-            { icon: AtSign, label: 'With @username',   value: withUsername.length,    color: 'var(--devcon-sky)' },
-            { icon: UserX,  label: 'Username not set', value: withoutUsername.length, color: 'var(--devcon-orange)' },
+            { icon: Users,       label: 'Total Members',  value: members.length,       color: 'var(--primary)' },
+            { icon: UserPlus,    label: 'New this week',  value: newThisWeek.length,   color: 'var(--devcon-sky)' },
+            { icon: CalendarDays,label: 'New this month', value: newThisMonth.length,  color: '#10b981' },
           ].map(stat => (
             <div
               key={stat.label}
@@ -88,7 +91,7 @@ export default function TeamPage() {
 
       ) : (
         <div
-          className="rounded-2xl overflow-hidden"
+          className="rounded-2xl overflow-hidden overflow-x-auto"
           style={{ border: '1px solid var(--border)', background: 'var(--card)' }}
         >
           {/* Table header */}

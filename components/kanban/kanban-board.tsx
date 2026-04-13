@@ -143,37 +143,48 @@ export function KanbanBoard({ campId }: KanbanBoardProps) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-3 mb-5 flex-wrap">
-        <div className="relative flex-1 min-w-48">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search tasks..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="pl-9 text-sm"
-          />
+      <div className="flex items-center gap-2 mb-5">
+        {/* Search + filter combined pill */}
+        <div
+          className="flex items-center flex-1 min-w-0 rounded-xl overflow-hidden"
+          style={{ border: '1px solid var(--border)', background: 'var(--secondary)' }}
+        >
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search tasks..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="pl-9 text-sm border-0 bg-transparent shadow-none focus-visible:ring-0 rounded-none h-10"
+            />
+          </div>
+
+          {/* Divider */}
+          <div className="w-px h-5 shrink-0" style={{ background: 'var(--border)' }} />
+
+          <Select value={filterPriority} onValueChange={v => setFilterPriority(v as TaskPriority | 'all')}>
+            <SelectTrigger className="w-32 sm:w-36 text-sm border-0 bg-transparent shadow-none focus:ring-0 rounded-none h-10 shrink-0">
+              <SlidersHorizontal className="h-3.5 w-3.5 mr-1.5 shrink-0 text-muted-foreground" />
+              <SelectValue placeholder="Priority" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="low">Low</SelectItem>
+              <SelectItem value="medium">Medium</SelectItem>
+              <SelectItem value="high">High</SelectItem>
+              <SelectItem value="urgent">Urgent</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
-        <Select value={filterPriority} onValueChange={v => setFilterPriority(v as TaskPriority | 'all')}>
-          <SelectTrigger className="w-36 text-sm">
-            <SlidersHorizontal className="h-3.5 w-3.5 mr-2 shrink-0 text-muted-foreground" />
-            <SelectValue placeholder="Priority" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Priorities</SelectItem>
-            <SelectItem value="low">Low</SelectItem>
-            <SelectItem value="medium">Medium</SelectItem>
-            <SelectItem value="high">High</SelectItem>
-            <SelectItem value="urgent">Urgent</SelectItem>
-          </SelectContent>
-        </Select>
-
+        {/* Add Task button */}
         <button
           onClick={() => openNewTask()}
-          className="btn-lime flex items-center gap-2 px-4 py-2 text-sm font-bold"
+          className="btn-lime flex items-center gap-2 px-4 h-10 text-sm font-bold shrink-0 rounded-xl"
         >
           <Plus className="h-4 w-4" />
-          Add Task
+          <span className="hidden sm:inline">Add Task</span>
+          <span className="sm:hidden">Add</span>
         </button>
       </div>
 
@@ -184,7 +195,7 @@ export function KanbanBoard({ campId }: KanbanBoardProps) {
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-        <div className="grid grid-cols-1 gap-4 pb-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-4">
           {TASK_STATUSES.map(col => (
             <KanbanColumn
               key={col.value}

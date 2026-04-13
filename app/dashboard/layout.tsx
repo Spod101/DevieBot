@@ -4,7 +4,7 @@ import Image from 'next/image'
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background">
-      <div className="relative min-h-screen">
+      <div className="relative min-h-screen overflow-x-hidden">
 
         {/* ── Ambient glow spheres ─────────────────────────────────── */}
         <div
@@ -41,7 +41,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Cloud — bottom of main content area, left-center (past sidebar) */}
         <div
-          className="fixed bottom-[-40px] pointer-events-none select-none z-0"
+          className="fixed bottom-[-40px] pointer-events-none select-none z-0 hidden md:block"
           style={{ left: 'calc(256px + 6%)', width: '210px', height: '210px' }}
           aria-hidden
         >
@@ -57,7 +57,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Cloud — small, top-left of main content area */}
         <div
-          className="fixed top-[8%] pointer-events-none select-none z-0"
+          className="fixed top-[8%] pointer-events-none select-none z-0 hidden md:block"
           style={{ left: 'calc(256px + 3%)', width: '130px', height: '130px' }}
           aria-hidden
         >
@@ -89,7 +89,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* ── Dashboard shell ───────────────────────────────────────── */}
         <div className="relative flex min-h-screen">
           <Sidebar />
-          <main className="flex-1 overflow-auto styled-scroll">
+          <main className="flex-1 overflow-auto styled-scroll pt-14 md:pt-0">
             {children}
           </main>
         </div>

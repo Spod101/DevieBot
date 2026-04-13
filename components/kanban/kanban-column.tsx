@@ -66,7 +66,7 @@ export function KanbanColumn({ status, label, hex, tasks, onTaskClick, onAddTask
 
       <div
         ref={setNodeRef}
-        className="min-h-[220px] rounded-xl p-2 space-y-2 transition-all lg:max-h-[calc(100vh-18rem)] lg:overflow-y-auto"
+        className="min-h-[160px] rounded-xl p-2 space-y-2 transition-all max-h-[60vh] overflow-y-auto sm:max-h-[50vh] lg:max-h-[calc((100vh-18rem)/2)]"
         style={{
           background: isOver
             ? `color-mix(in srgb, ${hex} 6%, transparent)`

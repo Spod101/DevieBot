@@ -431,7 +431,7 @@ export default function SettingsPage() {
                 type="time"
                 value={config.standup_time}
                 onChange={e => setConfig({ ...config, standup_time: e.target.value })}
-                className="w-36"
+                className="w-full sm:w-36"
               />
             </div>
 
