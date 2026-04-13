@@ -108,19 +108,22 @@ export async function sendTelegramMessage(
   text: string,
   options: SendOptions = {}
 ): Promise<{ ok: boolean; error?: string }> {
-  const token  = process.env.TELEGRAM_BOT_TOKEN
-  const chatId = process.env.TELEGRAM_CHAT_ID
+  const envToken = process.env.TELEGRAM_BOT_TOKEN
+  const envChatId = process.env.TELEGRAM_CHAT_ID
+
+  const supabase = createServiceClient()
+  const { data } = await supabase
+    .from('telegram_config')
+    .select('bot_token, chat_id')
+    .limit(1)
+    .single()
+
+  // Prefer dashboard-saved values; fall back to env vars for legacy setups.
+  const token = data?.bot_token?.trim() || envToken
+  const chatId = data?.chat_id?.trim() || envChatId
 
   if (!token || !chatId) {
-    const supabase = createServiceClient()
-    const { data } = await supabase
-      .from('telegram_config')
-      .select('bot_token, chat_id')
-      .limit(1)
-      .single()
-    if (!data?.bot_token || !data?.chat_id)
-      return { ok: false, error: 'Telegram not configured' }
-    return sendMessage(data.bot_token, data.chat_id, text, options)
+    return { ok: false, error: 'Telegram not configured' }
   }
 
   return sendMessage(token, chatId, text, options)
