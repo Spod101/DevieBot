@@ -60,15 +60,16 @@ export async function generateStandupMessage(): Promise<string> {
     _assignee: t.assigned_to ? `@${t.assigned_to}` : null,
   }))
 
-  const inProgress  = tasks.filter(t => t.status === 'in_progress')
-  const inReview    = tasks.filter(t => t.status === 'in_review')
-  const blocked     = tasks.filter(t => t.status === 'blocked')
-  const overdue     = tasks.filter(t =>
+  const backlogTasks = tasks.filter(t => t.status === 'backlog')
+  const todoTasks    = tasks.filter(t => t.status === 'todo')
+  const inProgress   = tasks.filter(t => t.status === 'in_progress')
+  const inReview     = tasks.filter(t => t.status === 'in_review')
+  const blocked      = tasks.filter(t => t.status === 'blocked')
+  const doneTasks    = tasks.filter(t => t.status === 'done')
+  const overdue      = tasks.filter(t =>
     t.due_date && new Date(t.due_date) < today && t.status !== 'done'
   )
-  const doneTasks   = tasks.filter(t => t.status === 'done')
-  const todoTasks   = tasks.filter(t => t.status === 'todo')
-  const activeTasks = tasks.filter(t => t.status !== 'done')
+  const activeTasks  = tasks.filter(t => t.status !== 'done')
 
   const upcomingCamps = allCamps.filter(c => c.status === 'active' || c.status === 'paused')
   const completedCamps = allCamps.filter(c => c.status === 'completed').length
@@ -84,7 +85,7 @@ export async function generateStandupMessage(): Promise<string> {
     const badge    = PRIORITY_BADGE[t.priority] ?? ''
     const assignee = t._assignee ? ` — ${h(t._assignee)}` : ''
     const due      = t.due_date
-      ? ` · 📅 ${new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+      ? ` · ${new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
       : ''
     return `▸ ${code}${title}${badge}${assignee}${due}`
   }
@@ -130,10 +131,13 @@ export async function generateStandupMessage(): Promise<string> {
     })
   }
 
-  msg += section('🔄', 'IN PROGRESS', inProgress, 10)
-  msg += section('👀', 'IN REVIEW',   inReview,   8)
-  msg += section('🚧', 'BLOCKED',     blocked,    10)
-  msg += section('⏰', 'OVERDUE',     overdue,    5)
+  msg += section('⏰', 'OVERDUE',      overdue,      5)
+  msg += section('🚧', 'BLOCKED',      blocked,     10)
+  msg += section('🔄', 'IN PROGRESS',  inProgress,  10)
+  msg += section('👀', 'IN REVIEW',    inReview,     8)
+  msg += section('📝', 'TO DO',        todoTasks,   10)
+  msg += section('📦', 'BACKLOG',      backlogTasks, 10)
+  msg += section('✅', 'DONE',         doneTasks,   10)
 
   msg += `\n\n📋 <b>TASK SUMMARY</b>\n`
   msg += `${DIV}\n`
@@ -141,6 +145,7 @@ export async function generateStandupMessage(): Promise<string> {
   msg += `🔄 In Progress: ${inProgress.length}\n`
   msg += `👀 In Review: ${inReview.length}\n`
   msg += `📝 To Do: ${todoTasks.length}\n`
+  msg += `📦 Backlog: ${backlogTasks.length}\n`
   msg += `🚧 Blocked: ${blocked.length}\n`
   msg += `⏰ Overdue: ${overdue.length}`
 

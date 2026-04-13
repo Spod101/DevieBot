@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { generateStandupMessage, sendTelegramMessage } from '@/lib/standup'
-import { parseBulkTasks, parseMessage, parseStatus, extractDueDate, DEADLINE_KEYWORDS } from '@/lib/nlp'
+import { parseBulkTasks, parseBulkUpdates, parseMessage, parseStatus, extractDueDate, DEADLINE_KEYWORDS } from '@/lib/nlp'
 import type { TaskStatus } from '@/types/database'
 
 /** Returns a due date 7 days from today (ISO YYYY-MM-DD) */
@@ -20,6 +20,39 @@ function validDate(d: string | null | undefined): string | null {
 // Escape HTML special characters for Telegram HTML parse mode
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** Priority dot emoji */
+const PRIORITY_EMOJI: Record<string, string> = {
+  urgent: '🔴', high: '🟠', medium: '🔵', low: '⚪',
+}
+
+/** Formatted single-task creation reply */
+function taskAddedMsg(task: {
+  title: string
+  task_number: number | null
+  id: string
+  priority: string
+  due_date?: string | null
+  assigned_to?: string | null
+  camp_id?: string | null
+}, campName?: string | null): string {
+  const dot   = PRIORITY_EMOJI[task.priority] ?? '🔵'
+  const pri   = task.priority.charAt(0).toUpperCase() + task.priority.slice(1)
+  const where = campName ? ` · ${esc(campName)}` : ''
+  const code  = task.task_number ? `t${task.task_number}` : task.id.slice(0, 6)
+
+  const lines: string[] = [
+    `${dot} Task added · ${pri}${where}:`,
+    `<b>${esc(task.title)}</b>`,
+  ]
+  if (task.assigned_to) lines.push(`👤 Assigned to: ${esc(task.assigned_to)}`)
+  if (task.due_date)    lines.push(`📅 Due: ${new Date(task.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`)
+  lines.push(`🪪 ID: <code>${code}</code>`)
+  lines.push('')
+  lines.push(`<i>Refresh dashboard to see changes.</i>`)
+
+  return lines.join('\n')
 }
 
 // Keyword gate — only run NLU on messages that plausibly contain a status update.
@@ -59,6 +92,36 @@ async function findTaskByPrefix(input: string, supabase: ReturnType<typeof creat
   // Fall back to UUID prefix (client-side)
   const { data } = await supabase.from('tasks').select('id, title, task_number').limit(500)
   return (data ?? []).find((t: any) => t.id.startsWith(clean.toLowerCase())) ?? null
+}
+
+// Find a task by ID/number (fast path) or title keyword (fallback).
+// Returns up to 5 title matches so callers can handle ambiguity.
+async function findTaskByRef(
+  input: string,
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<{ tasks: { id: string; title: string; task_number: number | null; status: string }[]; ambiguous: boolean }> {
+  // Fast path: numeric / T-XXX / UUID prefix — no extra DB call
+  const byId = await findTaskByPrefix(input, supabase)
+  if (byId) return { tasks: [{ ...byId, status: '' }], ambiguous: false }
+
+  // Title keyword search across non-done tasks
+  const { data } = await supabase
+    .from('tasks')
+    .select('id, title, task_number, status')
+    .ilike('title', `%${input}%`)
+    .neq('status', 'done')
+    .order('created_at', { ascending: false })
+    .limit(5)
+
+  const tasks = (data ?? []) as { id: string; title: string; task_number: number | null; status: string }[]
+  return { tasks, ambiguous: tasks.length > 1 }
+}
+
+// Format a task as a short disambiguation line: "23 · Fix login bug (in_progress)"
+function taskRefLine(t: { title: string; task_number: number | null; status: string }): string {
+  const num = t.task_number ?? '—'
+  const status = t.status ? ` (${t.status.replace(/_/g, ' ')})` : ''
+  return `• <b>${num}</b> · ${esc(t.title)}${status}`
 }
 
 // Resolve a @username to the member's display name (stored in assigned_to)
@@ -213,9 +276,9 @@ export async function POST(request: Request) {
         `/addtask &lt;title&gt; @username — assign to someone\n` +
         `/addcamp &lt;name&gt; — create a new camp\n\n` +
         `✏️ <b>Update</b>\n` +
-        `/done &lt;id&gt; — mark task as done\n` +
-        `/update &lt;id&gt; &lt;status&gt; — update task status\n` +
-        `<i>Statuses: backlog, todo, in progress, in review, blocked, done</i>`
+        `/done &lt;number or keyword&gt; — e.g. /done 23 or /done login bug\n` +
+        `/update &lt;number or keyword&gt; &lt;status&gt; — e.g. /update login in review\n` +
+        `<i>Statuses: backlog · todo · in progress · in review · blocked · done</i>`
       )
       return NextResponse.json({ ok: true })
     }
@@ -399,13 +462,21 @@ export async function POST(request: Request) {
             `/addtask fix login @dale urgent`
           ),
           '/addcamp': `Usage: <code>/addcamp &lt;name&gt;</code>\n\n<b>Example:</b>\n/addcamp Backend`,
-          '/done': `Usage: <code>/done &lt;task id&gt;</code>\n\n<b>Example:</b>\n/done a1b2c3\n\n<i>Use /tasks to see IDs</i>`,
-          '/update': (
-            `Usage: <code>/update &lt;id&gt; &lt;status&gt;</code>\n\n` +
+          '/done': (
+            `Usage: <code>/done &lt;number or keyword&gt;</code>\n\n` +
             `<b>Examples:</b>\n` +
-            `/update a1b2c3 in review\n` +
-            `/update a1b2c3 blocked\n\n` +
-            `<i>Use /tasks to see IDs</i>`
+            `/done 23\n` +
+            `/done login bug\n` +
+            `/done fix api\n\n` +
+            `<i>Use the task number or any words from the title</i>`
+          ),
+          '/update': (
+            `Usage: <code>/update &lt;number or keyword&gt; &lt;status&gt;</code>\n\n` +
+            `<b>Examples:</b>\n` +
+            `/update 23 in review\n` +
+            `/update login in review\n` +
+            `/update docs blocked\n\n` +
+            `<i>Statuses: backlog · todo · in progress · in review · blocked · done</i>`
           ),
         }
         await reply(examples[cmd])
@@ -414,31 +485,49 @@ export async function POST(request: Request) {
 
       // ── /done fast path ──────────────────────────────────────────────
       if (cmd === '/done') {
-        const taskId = args[0]
-        if (!taskId) {
-          await reply('❌ Provide a task ID.\nExample: <code>/done a1b2c3</code>\n\n<i>Use /tasks to see IDs</i>')
+        // Allow multi-word: "/done fix login bug" — join all args as one ref
+        const ref = args.join(' ').trim()
+        if (!ref) {
+          await reply(
+            `Usage: <code>/done &lt;number or keyword&gt;</code>\n\n` +
+            `<b>Examples:</b>\n/done 23\n/done login bug\n\n` +
+            `<i>Use the task number or any words from the title</i>`
+          )
           return NextResponse.json({ ok: true })
         }
-        const task = await findTaskByPrefix(taskId, supabase)
-        if (!task) {
-          await reply(`❌ No task found with ID starting with <code>${taskId}</code>`)
+        const { tasks: doneTasks, ambiguous: doneAmbiguous } = await findTaskByRef(ref, supabase)
+        if (doneTasks.length === 0) {
+          await reply(`❌ No active task found matching <b>"${esc(ref)}"</b>\n\n<i>Use /tasks to see all active tasks</i>`)
           return NextResponse.json({ ok: true })
         }
-        await supabase.from('tasks').update({ status: 'done' }).eq('id', task.id)
-        const doneTitle = esc(task.title)
-        await reply(`✅ <b>${doneTitle}</b>\nMarked as done! Great work! 🎉`)
+        if (doneAmbiguous) {
+          const list = doneTasks.map(taskRefLine).join('\n')
+          await reply(
+            `🔍 Found ${doneTasks.length} tasks matching <b>"${esc(ref)}"</b>:\n${list}\n\n` +
+            `Be more specific or use the task number:\n<code>/done &lt;number&gt;</code>`
+          )
+          return NextResponse.json({ ok: true })
+        }
+        const doneTask = doneTasks[0]
+        await supabase.from('tasks').update({ status: 'done' }).eq('id', doneTask.id)
+        await reply(`✅ <b>${esc(doneTask.title)}</b>\nMarked as done! Great work! 🎉`)
         return NextResponse.json({ ok: true })
       }
 
       // ── /update fast path ─────────────────────────────────────────────
       if (cmd === '/update') {
-        const taskId = args[0]
+        // ref = first arg (number or single keyword); status = everything after
+        const ref = args[0]
         const statusRaw = args.slice(1).join(' ').toLowerCase()
           .replace(/mark\s+(as\s+)?/i, '').trim()
           .replace(/[\s-]+/g, '_')
 
-        if (!taskId || !statusRaw) {
-          await reply('❌ Usage: <code>/update &lt;id&gt; &lt;status&gt;</code>\n\nStatuses: todo · in progress · in review · blocked · done\n\n<i>Use /tasks to see IDs</i>')
+        if (!ref || !statusRaw) {
+          await reply(
+            `Usage: <code>/update &lt;number or keyword&gt; &lt;status&gt;</code>\n\n` +
+            `<b>Examples:</b>\n/update 23 in review\n/update login blocked\n\n` +
+            `<i>Statuses: backlog · todo · in progress · in review · blocked · done</i>`
+          )
           return NextResponse.json({ ok: true })
         }
 
@@ -453,21 +542,29 @@ export async function POST(request: Request) {
         }
 
         if (!mappedStatus) {
-          await reply(`❌ Unknown status <b>${esc(statusRaw)}</b>\nValid: todo · in progress · in review · blocked · done`)
+          await reply(`❌ Unknown status <b>${esc(statusRaw)}</b>\nValid: backlog · todo · in progress · in review · blocked · done`)
           return NextResponse.json({ ok: true })
         }
 
-        const task = await findTaskByPrefix(taskId, supabase)
-        if (!task) {
-          await reply(`❌ No task found with ID starting with <code>${taskId}</code>`)
+        const { tasks: updTasks, ambiguous: updAmbiguous } = await findTaskByRef(ref, supabase)
+        if (updTasks.length === 0) {
+          await reply(`❌ No active task found matching <b>"${esc(ref)}"</b>\n\n<i>Use /tasks to see all active tasks</i>`)
           return NextResponse.json({ ok: true })
         }
-        await supabase.from('tasks').update({ status: mappedStatus }).eq('id', task.id)
-        const statusEmoji: Record<string, string> = {
-          todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
+        if (updAmbiguous) {
+          const list = updTasks.map(taskRefLine).join('\n')
+          await reply(
+            `🔍 Found ${updTasks.length} tasks matching <b>"${esc(ref)}"</b>:\n${list}\n\n` +
+            `Be more specific or use the task number:\n<code>/update &lt;number&gt; ${statusRaw.replace(/_/g, ' ')}</code>`
+          )
+          return NextResponse.json({ ok: true })
         }
-        const updTitle = esc(task.title)
-        await reply(`${statusEmoji[mappedStatus] ?? '📌'} <b>${updTitle}</b>\nMoved to: <b>${mappedStatus.replace(/_/g, ' ')}</b>`)
+        const updTask = updTasks[0]
+        await supabase.from('tasks').update({ status: mappedStatus }).eq('id', updTask.id)
+        const statusEmoji: Record<string, string> = {
+          backlog: '📦', todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
+        }
+        await reply(`${statusEmoji[mappedStatus] ?? '📌'} <b>${esc(updTask.title)}</b>\nMoved to: <b>${mappedStatus.replace(/_/g, ' ')}</b>`)
         return NextResponse.json({ ok: true })
       }
 
@@ -489,6 +586,7 @@ export async function POST(request: Request) {
             priority: t.priority, order_index: 0,
             assigned_to: t.assignee, camp_id: null,
             due_date: validDate(t.dueDate) ?? defaultDueDate(),
+            description: t.description ?? null,
           }))
           const { data: created, error } = await supabase.from('tasks').insert(inserts).select()
           if (error || !created) {
@@ -499,10 +597,13 @@ export async function POST(request: Request) {
           created.forEach((t: any) => {
             const key = t.assigned_to ?? 'unassigned'
             if (!grouped[key]) grouped[key] = []
-            grouped[key].push(`• ${t.title}`)
+            const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
+            const due = t.due_date ? ` · ${new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''
+            const hasLink = t.description && /https?:\/\//.test(t.description) ? ' 🔗' : ''
+            grouped[key].push(`• <code>${code}</code> ${esc(t.title)}${due}${hasLink}`)
           })
-          let msg = `✅ *${created.length} task${created.length > 1 ? 's' : ''} created!*\n\n`
-          Object.entries(grouped).forEach(([a, items]) => { msg += `@${a}\n${items.join('\n')}\n\n` })
+          let msg = `✅ <b>${created.length} task${created.length > 1 ? 's' : ''} created!</b>\n\n`
+          Object.entries(grouped).forEach(([a, items]) => { msg += `@${esc(a)}\n${items.join('\n')}\n\n` })
           await reply(msg.trim())
           return NextResponse.json({ ok: true })
         }
@@ -529,10 +630,7 @@ export async function POST(request: Request) {
           if (error || !task) {
             await reply('❌ Failed to create task.')
           } else {
-            const t0 = esc(task.title)
-            const assigneeLine = assignee ? ` · ${esc(assignee)}` : ''
-            const dueDisplay = new Date(due).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-            await reply(`✅ Task added!\n<b>${t0}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 6)}</code> · medium · 📅 ${dueDisplay}${assigneeLine}`)
+            await reply(taskAddedMsg({ ...task, priority: 'medium', due_date: due, assigned_to: assignee }))
           }
           return NextResponse.json({ ok: true })
         }
@@ -571,10 +669,7 @@ export async function POST(request: Request) {
           if (error || !task) {
             await reply('❌ Failed to create task.')
           } else {
-            const t1 = esc(task.title)
-            const nameDisplay = esc(assignedName)
-            const dueDisplay = new Date(due).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-            await reply(`✅ Task added!\n<b>${t1}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 8)}</code> · ${priority} · ${nameDisplay} · 📅 ${dueDisplay}`)
+            await reply(taskAddedMsg({ ...task, priority, due_date: due, assigned_to: assignedName }))
           }
           return NextResponse.json({ ok: true })
         }
@@ -583,7 +678,7 @@ export async function POST(request: Request) {
       // Load context for NLP
       const [campsRes, tasksRes] = await Promise.all([
         supabase.from('code_camps').select('name').eq('status', 'active'),
-        supabase.from('tasks').select('id, title, status').neq('status', 'done').limit(20),
+        supabase.from('tasks').select('id, title, status, task_number').neq('status', 'done').limit(20),
       ])
       const intent = await parseMessage(text, {
         camps: (campsRes.data ?? []).map((c: any) => c.name),
@@ -611,16 +706,13 @@ export async function POST(request: Request) {
         }
         const { data: task, error } = await supabase
           .from('tasks')
-          .insert({ title, status: 'todo', priority: validPriority, order_index: 0, camp_id: campId, assigned_to: assignedTo ?? null, due_date: due })
+          .insert({ title, status: 'todo', priority: validPriority, order_index: 0, camp_id: campId, assigned_to: assignedTo ?? null, due_date: due, description: null })
           .select().single()
         if (error || !task) {
           await reply('❌ Failed to create task.')
         } else {
           const t3 = esc(task.title)
-          const where = campName ? ` in <b>${campName}</b>` : ''
-          const assignee = assignedTo ? ` · @${assignedTo}` : ''
-          const dueDisplay = new Date(due).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-          await reply(`✅ Task added${where}!\n<b>${t3}</b>\nID: <code>${task.task_number ? `T-${String(task.task_number).padStart(3, '0')}` : task.id.slice(0, 8)}</code> · ${validPriority} · 📅 ${dueDisplay}${assignee}`)
+          await reply(taskAddedMsg({ ...task, priority: validPriority, due_date: due, assigned_to: assignedTo ?? null }, campName))
         }
         return NextResponse.json({ ok: true })
       }
@@ -706,6 +798,7 @@ export async function POST(request: Request) {
         assigned_to: t.assignee,
         camp_id: null,
         due_date: validDate(t.dueDate) ?? defaultDueDate(),
+        description: t.description ?? null,
       }))
 
       const { data: created, error } = await supabase.from('tasks').insert(inserts).select()
@@ -720,16 +813,46 @@ export async function POST(request: Request) {
       created.forEach((t: any) => {
         const key = t.assigned_to ?? 'unassigned'
         if (!grouped[key]) grouped[key] = []
-        grouped[key].push(`• ${t.title}`)
+        const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
+        const due = t.due_date ? ` · ${new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''
+        const hasLink = t.description && /https?:\/\//.test(t.description) ? ' 🔗' : ''
+        grouped[key].push(`• <code>${code}</code> ${esc(t.title)}${due}${hasLink}`)
       })
 
       let msg = `✅ <b>${created.length} task${created.length > 1 ? 's' : ''} created!</b>\n\n`
       Object.entries(grouped).forEach(([assignee, items]) => {
-        const safeItems = items.map(i => esc(i))
-        msg += `@${assignee}\n${safeItems.join('\n')}\n\n`
+        msg += `@${esc(assignee)}\n${items.join('\n')}\n\n`
       })
       await reply(msg.trim())
       return NextResponse.json({ ok: true })
+    }
+
+    // ── Bulk status updates (no slash, no @mention) ───────────────────────
+    // Fires when message contains update shorthand or multiple status references.
+    // e.g. "done: login, deploy" / "login → done, docs → in review" / "finished X and Y is in review"
+    const BULK_UPDATE_TRIGGER = /(?:→|done:|finished|completed|in\s+review:|blocked:|in\s+progress:).+(?:,|and\s+).+/i
+    if (!cmd.startsWith('/') && BULK_UPDATE_TRIGGER.test(text) && !text.match(/@\w/)) {
+      const bulkUpdates = await parseBulkUpdates(text)
+      if (bulkUpdates.length >= 2) {
+        const statusEmoji: Record<string, string> = {
+          backlog: '📦', todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
+        }
+        const results: string[] = []
+        for (const upd of bulkUpdates) {
+          const { tasks: found, ambiguous } = await findTaskByRef(upd.taskRef, supabase)
+          if (found.length === 0) {
+            results.push(`❌ <b>"${esc(upd.taskRef)}"</b> — not found`)
+          } else if (ambiguous) {
+            results.push(`⚠️ <b>"${esc(upd.taskRef)}"</b> — multiple matches, be more specific`)
+          } else {
+            await supabase.from('tasks').update({ status: upd.status }).eq('id', found[0].id)
+            const emoji = statusEmoji[upd.status] ?? '📌'
+            results.push(`${emoji} ${esc(found[0].title)} → <b>${upd.status.replace(/_/g, ' ')}</b>`)
+          }
+        }
+        await reply(`📋 <b>${bulkUpdates.length} update${bulkUpdates.length > 1 ? 's' : ''}:</b>\n${results.join('\n')}`)
+        return NextResponse.json({ ok: true })
+      }
     }
 
     // ── NLU: plain-text status expressions (no slash, no @mention) ───────

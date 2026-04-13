@@ -3,42 +3,58 @@ import type { TaskStatus } from '@/types/database'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
+// ── BulkTask ──────────────────────────────────────────────────────────────────
 export type BulkTask = {
   assignee: string
   title: string
+  description?: string | null   // supporting notes, context, URLs — preserved verbatim
   priority: 'low' | 'medium' | 'high' | 'urgent'
-  dueDate?: string  // ISO date YYYY-MM-DD, null if not mentioned
+  dueDate?: string | null       // ISO date YYYY-MM-DD
 }
 
 export async function parseBulkTasks(message: string): Promise<BulkTask[]> {
   const today = new Date().toISOString().split('T')[0]
   const systemPrompt = `You are a task extractor for a project management bot.
-The user will send a block of text that assigns tasks to people using @mentions.
-Extract every actionable task for each person and return ONLY a JSON array.
+The user will send text that assigns work to one or more people via @mentions.
+Extract every actionable task and return ONLY a JSON array.
 Today's date is ${today}.
 
-Each item in the array must have:
-- "assignee": the @username (without the @ symbol, lowercase, no spaces — use the first word of the name if it's a full name)
-- "title": a concise task title (max ~60 chars), stripped of any deadline phrases
-- "priority": "low" | "medium" | "high" | "urgent" (infer from urgency words; default "medium")
-- "dueDate": a due date in YYYY-MM-DD format if mentioned (e.g. "by Friday", "due tomorrow", "in 3 days"), otherwise null
+SUPPORTED MESSAGE FORMATS:
+1. Single @mention at top, multiple paragraphs below — each paragraph is a SEPARATE task for that person:
+   "@Dale
+   Summarize recommendations into slides.
 
-Rules:
-- One bullet point or sentence = one task
-- If a person has multiple tasks, produce multiple entries for them
-- Ignore conversational filler, only extract clear action items
-- Strip deadline phrases from the title (e.g. "fix bug by Friday" → title: "fix bug", dueDate: "YYYY-MM-DD")
-- Always return ONLY a raw JSON array, no markdown, no explanation
+   Action Plan: Present these as actionable items for the team tomorrow.
+
+   Note: Standby on-site. Make sure data is clean."
+   → 3 tasks all assigned to "dale"
+
+2. Multiple @mentions inline — one task per mention:
+   "@dale fix login @kien review PR"
+   → 2 tasks for different people
+
+3. Bullet / numbered lists under a single @mention — each bullet is a separate task.
+
+EXTRACTION RULES:
+- "assignee": @username without @, lowercase, first word only if full name (e.g. "Dale Reyes" → "dale")
+- "title": concise action (max 70 chars). Strip label prefixes like "Action Plan:", "Note:", "FYI:", "Task:", "Update:"
+- "description": any supporting context, details, or URLs within that paragraph BEYOND the main action verb phrase. Preserve URLs verbatim. null if nothing extra.
+- "priority": "low"|"medium"|"high"|"urgent" — infer from urgency words, default "medium"
+- "dueDate": YYYY-MM-DD if a deadline is mentioned (today, tomorrow, weekday name, "by Friday", "in 3 days"), else null. Apply deadline to all tasks in the same paragraph if mentioned once.
+- Strip deadline phrases from title but keep them in dueDate.
+- NEVER discard URLs — put them in description if not in title.
+- Return ONLY a raw JSON array. No markdown, no explanation.
 
 Example output:
 [
-  {"assignee":"dale","title":"Summarize recommendations into slides","priority":"high","dueDate":null},
-  {"assignee":"kien","title":"Follow up on game plan for post-event content","priority":"medium","dueDate":"2026-04-15"}
+  {"assignee":"dale","title":"Summarize recommendations into slides","description":null,"priority":"medium","dueDate":null},
+  {"assignee":"dale","title":"Present recommendations as actionable for Mike and Lady","description":"Ensure they are ready for tomorrow's meeting.","priority":"medium","dueDate":"2026-04-14"},
+  {"assignee":"kien","title":"Follow up on game plan","description":"https://docs.google.com/...","priority":"medium","dueDate":"2026-04-15"}
 ]`
 
   const response = await client.messages.create({
     model: 'claude-haiku-4-5',
-    max_tokens: 1024,
+    max_tokens: 2048,
     system: systemPrompt,
     messages: [{ role: 'user', content: message }],
   })
@@ -54,6 +70,55 @@ Example output:
   }
 }
 
+// ── BulkUpdate ────────────────────────────────────────────────────────────────
+export type BulkUpdate = {
+  taskRef: string     // keyword or number, e.g. "login bug" or "23"
+  status: TaskStatus
+}
+
+/**
+ * Extract multiple { taskRef, status } pairs from a message.
+ * Handles both structured shorthand and natural language:
+ *   structured: "done: login, deploy"  /  "login → done, docs → in review"
+ *   natural:    "finished login bug and docs is now in review"
+ */
+export async function parseBulkUpdates(message: string): Promise<BulkUpdate[]> {
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 512,
+    system: `You extract task status update pairs from a message.
+Return ONLY a JSON array of objects with:
+- "taskRef": a short keyword or number identifying the task (e.g. "login bug", "deploy app", "23")
+- "status": one of: backlog | todo | in_progress | in_review | blocked | done
+
+Map natural language to status values:
+- "done" / "finished" / "completed" / "shipped" / "wrapped up" → done
+- "working on" / "started" / "in progress" / "wip" / "picking up" → in_progress
+- "in review" / "reviewing" / "up for review" / "ready for review" → in_review
+- "blocked" / "stuck" / "waiting for" / "held up" → blocked
+- "todo" / "not started" / "will do" → todo
+- "backlog" / "parked" → backlog
+
+Handle both formats:
+- Structured: "done: login bug, deploy app" or "login → done, docs → in review"
+- Natural: "finished login bug and docs is now in review"
+
+Return ONLY raw JSON array, no markdown, no explanation.
+Example: [{"taskRef":"login bug","status":"done"},{"taskRef":"docs","status":"in_review"}]`,
+    messages: [{ role: 'user', content: message }],
+  })
+
+  const raw = (response.content[0] as { type: string; text: string }).text.trim()
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return parsed as BulkUpdate[]
+    return []
+  } catch {
+    return []
+  }
+}
+
+// ── parseStatus ───────────────────────────────────────────────────────────────
 export async function parseStatus(text: string): Promise<TaskStatus | null> {
   const response = await client.messages.create({
     model: 'claude-haiku-4-5',
@@ -70,26 +135,36 @@ If the text does not clearly indicate a task status, return exactly: null`,
   return VALID.includes(raw as TaskStatus) ? (raw as TaskStatus) : null
 }
 
-// Gate — only call extractDueDate when these keywords are present
+// ── extractDueDate ────────────────────────────────────────────────────────────
+// Gate — only call extractDueDate when these keywords are present (checked on URL-stripped text)
 export const DEADLINE_KEYWORDS = /\b(by|due|until|before|deadline|tomorrow|tonight|today|next\s+week|next\s+\w+day|in\s+\d+\s+days?|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i
 
 const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
 
 /**
  * Extract a due date from natural language text.
- * Regex-first for common patterns (today/tomorrow/days/weekdays) — zero Claude calls.
- * Falls back to Claude only for complex date phrases (e.g. "April 20", "end of month").
- * Also strips the deadline phrase from the text.
+ * URLs are stripped before deadline detection to prevent false positives.
+ * Regex-first for common patterns — Claude fallback for complex phrases.
  */
 export async function extractDueDate(text: string): Promise<{ dueDate: string | null; cleanText: string }> {
   const base = new Date()
   base.setHours(0, 0, 0, 0)
   const todayStr = base.toISOString().split('T')[0]
-  const lower = text.toLowerCase()
 
-  // Helper: strip deadline prepositions + the matched phrase
+  // Strip URLs before deadline keyword detection — URLs may contain words like "by", "today", etc.
+  const textWithoutUrls = text.replace(/https?:\/\/\S+/g, '')
+  if (!DEADLINE_KEYWORDS.test(textWithoutUrls)) {
+    return { dueDate: null, cleanText: text }
+  }
+
+  const lower = textWithoutUrls.toLowerCase()
+
+  // Helper: strip deadline prepositions + the matched phrase from the ORIGINAL text (preserving URLs).
+  // Also removes any dangling preposition left at the end (e.g. "prepare ppt for tomorrow" → "prepare ppt").
+  const DANGLING = /\s+\b(by|due|until|before|for|on|at)\b\s*$/i
   const strip = (re: RegExp) =>
-    text.replace(new RegExp(`(?:(?:by|due|until|before)\\s+)?${re.source}`, 'gi'), '')
+    text.replace(new RegExp(`(?:(?:by|due|until|before|for|on|at)\\s+)?${re.source}`, 'gi'), '')
+      .replace(DANGLING, '')
       .replace(/\s{2,}/g, ' ').trim()
 
   // ── today / tonight ──────────────────────────────────────────────────────
@@ -109,7 +184,7 @@ export async function extractDueDate(text: string): Promise<{ dueDate: string | 
     const d = new Date(base); d.setDate(d.getDate() + parseInt(inDays[1]))
     return {
       dueDate: d.toISOString().split('T')[0],
-      cleanText: text.replace(/\bin\s+\d+\s+days?\b/gi, '').replace(/\s{2,}/g, ' ').trim(),
+      cleanText: text.replace(/\bin\s+\d+\s+days?\b/gi, '').replace(DANGLING, '').replace(/\s{2,}/g, ' ').trim(),
     }
   }
 
@@ -141,7 +216,7 @@ export async function extractDueDate(text: string): Promise<{ dueDate: string | 
       system: `Today is ${todayStr}.
 Extract any deadline from the text. Return ONLY a JSON object:
 - "dueDate": YYYY-MM-DD format, or null
-- "cleanText": text with the deadline phrase removed (trimmed)
+- "cleanText": text with the deadline phrase removed (trimmed), preserving any URLs verbatim
 Return ONLY raw JSON, no markdown.`,
       messages: [{ role: 'user', content: text }],
     })
@@ -157,7 +232,7 @@ Return ONLY raw JSON, no markdown.`,
   }
 }
 
-// ── ParsedIntent ─────────────────────────────────────────────────────────────
+// ── ParsedIntent ──────────────────────────────────────────────────────────────
 export type ParsedIntent =
   | { intent: 'addtask'; title: string; priority?: string; campName?: string; assignedTo?: string; dueDate?: string | null }
   | { intent: 'addcamp'; campName: string }
@@ -171,7 +246,7 @@ export type ParsedIntent =
 
 export async function parseMessage(
   message: string,
-  context: { camps: string[]; recentTasks: { id: string; title: string; status: string }[] }
+  context: { camps: string[]; recentTasks: { id: string; title: string; status: string; task_number?: number | null }[] }
 ): Promise<ParsedIntent> {
   const today = new Date().toISOString().split('T')[0]
   const campsContext = context.camps.length
@@ -181,7 +256,10 @@ export async function parseMessage(
   const tasksContext = context.recentTasks.length
     ? `Recent tasks:\n${context.recentTasks
         .slice(0, 20)
-        .map(t => `- [${t.id.slice(0, 6)}] "${t.title}" (${t.status})`)
+        .map(t => {
+          const ref = t.task_number ? `#${t.task_number}` : t.id.slice(0, 6)
+          return `- [${ref}] "${t.title}" (${t.status})`
+        })
         .join('\n')}`
     : 'No recent tasks.'
 
@@ -218,7 +296,7 @@ Rules:
   * "done with X" / "finished X" / "completed X" / "wrapped up X" / "shipped X" / "delivered X" → done
   * "haven't started" / "will do X" / "to do" / "planning X" → todo
   * "backlog" / "parked" / "overdue" → backlog
-- If the user references a task by partial title, find the closest match from recent tasks and use its ID
+- If the user references a task by partial title OR by number (e.g. "task 23", "#23"), find the closest match from recent tasks and use its UUID's first 6 chars as taskId
 - If the intent is clearly a status update but no task title matches recent tasks, still return the update intent with taskId set to null
 - Only use intent:"unknown" for genuine chitchat with zero task/project relevance
 - Always return ONLY raw JSON, no markdown, no explanation`
