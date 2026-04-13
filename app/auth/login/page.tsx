@@ -43,8 +43,8 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <div className="flex justify-center mb-3">
-            <Image src="/icons/icon.png" alt="Devie" width={64} height={64} className="object-contain" />
+          <div className="flex justify-center mb-6">
+            <Image src="/icons/icon.png" alt="Devie" width={128} height={128} className="object-contain drop-shadow-[0_0_24px_rgba(99,179,237,0.4)]" />
           </div>
           <CardTitle className="text-2xl">Devie</CardTitle>
           <CardDescription>Enter your admin password to continue</CardDescription>
