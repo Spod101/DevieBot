@@ -146,26 +146,18 @@ export default function SettingsPage() {
   async function registerWebhook() {
     if (!config?.bot_token) { toast.error('Save your bot token first'); return }
     setRegisteringWebhook(true)
-    const webhookUrl = `${window.location.origin}/api/telegram/webhook`
     try {
-      const res  = await fetch(
-        `https://api.telegram.org/bot${config.bot_token}/setWebhook`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message', 'chat_member', 'my_chat_member'] }),
-        }
-      )
+      const res  = await fetch('/api/telegram/webhook', { method: 'POST' })
       const data = await res.json()
       if (data.ok) {
         toast.success('Webhook registered!')
-        addLog('ok', `Registered → ${webhookUrl}`)
+        addLog('ok', `Registered webhook`)
         await checkWebhook()
       } else {
-        toast.error(data.description || 'Failed')
-        addLog('error', data.description || 'Registration failed')
+        toast.error(data.description || data.error || 'Failed')
+        addLog('error', data.description || data.error || 'Registration failed')
       }
-    } catch { addLog('error', 'Could not reach Telegram API') }
+    } catch { addLog('error', 'Could not register webhook') }
     setRegisteringWebhook(false)
   }
 
