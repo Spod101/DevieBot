@@ -72,22 +72,22 @@ export async function generateStandupMessage(): Promise<string> {
   msg += `📋 <b>DEVCON COHORT 4 — Daily Stand Up</b>\n`
   msg += `<i>${h(dateStr)}</i>\n`
 
-  msg += `\n📊 <b>KPI SNAPSHOT</b>\n`
+  msg += `\n📊 <b>Overview</b>\n`
   msg += `${DIV}\n`
   msg += `📌 Active Tasks: <b>${activeTasks.length}</b>\n`
   msg += `✅ Done: <b>${doneTasks.length}</b>\n`
   msg += `🚧 Blocked: <b>${blocked.length}</b>\n`
   msg += `⏰ Overdue: <b>${overdue.length}</b>\n`
 
-  msg += section('⏰', 'OVERDUE',      overdue,      5)
-  msg += section('🚧', 'BLOCKED',      blocked,     10)
-  msg += section('🔄', 'IN PROGRESS',  inProgress,  10)
-  msg += section('👀', 'IN REVIEW',    inReview,     8)
-  msg += section('📝', 'TO DO',        todoTasks,   10)
-  msg += section('📦', 'BACKLOG',      backlogTasks, 10)
-  msg += section('✅', 'DONE',         doneTasks,   10)
+  msg += section('⏰', 'Overdue',      overdue,      5)
+  msg += section('🚧', 'Blocked',      blocked,     10)
+  msg += section('🔄', 'In Progress',  inProgress,  10)
+  msg += section('👀', 'In Review',    inReview,     8)
+  msg += section('📝', 'To Do',        todoTasks,   10)
+  msg += section('📦', 'Backlog',      backlogTasks, 10)
+  msg += section('✅', 'Done',         doneTasks,   10)
 
-  msg += `\n\n📋 <b>TASK SUMMARY</b>\n`
+  msg += `\n\n📋 <b>Summary</b>\n`
   msg += `${DIV}\n`
   msg += `✅ Done: ${doneTasks.length}\n`
   msg += `🔄 In Progress: ${inProgress.length}\n`
@@ -95,7 +95,8 @@ export async function generateStandupMessage(): Promise<string> {
   msg += `📝 To Do: ${todoTasks.length}\n`
   msg += `📦 Backlog: ${backlogTasks.length}\n`
   msg += `🚧 Blocked: ${blocked.length}\n`
-  msg += `⏰ Overdue: ${overdue.length}`
+  msg += `⏰ Overdue: ${overdue.length}\n`
+  msg += `\n<i>Let's make it a productive day. 💪</i>`
 
   return msg
 }

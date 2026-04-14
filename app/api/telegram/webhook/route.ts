@@ -50,7 +50,7 @@ function taskAddedMsg(task: {
   if (task.due_date)    lines.push(`📅 Due: ${new Date(task.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`)
   lines.push(`🪪 ID: <code>${code}</code>`)
   lines.push('')
-  lines.push(`<i>Refresh dashboard to see changes.</i>`)
+  lines.push(`<i>Refresh the dashboard to see your changes.</i>`)
 
   return lines.join('\n')
 }
@@ -293,15 +293,15 @@ export async function POST(request: Request) {
     // ── /help or /start ───────────────────────────────────────────────
     if (cmd === '/help' || cmd === '/start') {
       await reply(
-        `🤖 <b>Devie Bot — Commands</b>\n\n` +
+        `🤖 <b>Devie — Available Commands</b>\n\n` +
         `📋 <b>View</b>\n` +
-        `/tasks — list active tasks\n` +
+        `/tasks — list your active tasks\n` +
         `/deadlines — show upcoming deadlines\n` +
-        `/standup — send standup report\n\n` +
+        `/standup — send the standup report\n\n` +
         `➕ <b>Create</b>\n` +
         `/addtask &lt;title&gt; — add a task (7-day deadline by default)\n` +
-        `/addtask &lt;title&gt; by Friday — task with specific deadline\n` +
-        `/addtask &lt;title&gt; @username — assign to someone\n\n` +
+        `/addtask &lt;title&gt; by Friday — add a task with a specific deadline\n` +
+        `/addtask &lt;title&gt; @username — add a task and assign it to someone\n\n` +
         `✏️ <b>Update</b>\n` +
         `/done &lt;number or keyword&gt; — e.g. /done 23 or /done login bug\n` +
         `/update &lt;number or keyword&gt; &lt;status&gt; — e.g. /update login in review\n` +
@@ -328,7 +328,7 @@ export async function POST(request: Request) {
         .limit(20)
 
       if (!tasks || tasks.length === 0) {
-        await reply('📅 No tasks with deadlines in the next 7 days.')
+        await reply('📅 No upcoming deadlines in the next 7 days.')
         return NextResponse.json({ ok: true })
       }
 
@@ -362,7 +362,7 @@ export async function POST(request: Request) {
           msg += `• <code>${code}</code> ${esc(t.title)} · ${dueDate}${assignee}\n`
         })
       }
-      msg += `\n<i>Use /done &lt;id&gt; to mark complete</i>`
+      msg += `\n<i>Use /done &lt;id&gt; to mark a task complete.</i>`
       await reply(msg)
       return NextResponse.json({ ok: true })
     }
@@ -398,7 +398,7 @@ export async function POST(request: Request) {
 
       if (filtered.length === 0) {
         const who = resolvedNames.length ? ` for ${resolvedNames.join(', ')}` : ''
-        await reply(`📋 No active tasks${who}.`)
+        await reply(`📋 No active tasks found${who}.`)
         return NextResponse.json({ ok: true })
       }
 
@@ -422,7 +422,7 @@ export async function POST(request: Request) {
         msg += `${labels[status] || status}\n${items.join('\n')}\n\n`
       })
 
-      msg += `<i>Filter: /tasks @name</i>`
+      msg += `<i>Filter by member: /tasks @name</i>`
 
       await reply(msg)
       return NextResponse.json({ ok: true })
@@ -445,7 +445,7 @@ export async function POST(request: Request) {
             `/done 23\n` +
             `/done login bug\n` +
             `/done fix api\n\n` +
-            `<i>Use the task number or any words from the title</i>`
+            `<i>Use the task number or any words from the title.</i>`
           ),
           '/update': (
             `Usage: <code>/update &lt;number or keyword&gt; &lt;status&gt;</code>\n\n` +
@@ -468,26 +468,26 @@ export async function POST(request: Request) {
           await reply(
             `Usage: <code>/done &lt;number or keyword&gt;</code>\n\n` +
             `<b>Examples:</b>\n/done 23\n/done login bug\n\n` +
-            `<i>Use the task number or any words from the title</i>`
+            `<i>Use the task number or any words from the title.</i>`
           )
           return NextResponse.json({ ok: true })
         }
         const { tasks: doneTasks, ambiguous: doneAmbiguous } = await findTaskByRef(ref, supabase)
         if (doneTasks.length === 0) {
-          await reply(`❌ No active task found matching <b>"${esc(ref)}"</b>\n\n<i>Use /tasks to see all active tasks</i>`)
+          await reply(`❌ No active task found matching <b>"${esc(ref)}"</b>.\n\n<i>Use /tasks to see all active tasks.</i>`)
           return NextResponse.json({ ok: true })
         }
         if (doneAmbiguous) {
           const list = doneTasks.map(taskRefLine).join('\n')
           await reply(
-            `🔍 Found ${doneTasks.length} tasks matching <b>"${esc(ref)}"</b>:\n${list}\n\n` +
-            `Be more specific or use the task number:\n<code>/done &lt;number&gt;</code>`
+            `🔍 Multiple tasks matched <b>"${esc(ref)}"</b>:\n${list}\n\n` +
+            `Please be more specific, or use the task number:\n<code>/done &lt;number&gt;</code>`
           )
           return NextResponse.json({ ok: true })
         }
         const doneTask = doneTasks[0]
         await supabase.from('tasks').update({ status: 'done' }).eq('id', doneTask.id)
-        await reply(`✅ <b>${esc(doneTask.title)}</b>\nMarked as done! Great work! 🎉`)
+        await reply(`✅ <b>${esc(doneTask.title)}</b>\nMarked as done. Nice work! 🎉`)
         return NextResponse.json({ ok: true })
       }
 
@@ -503,7 +503,7 @@ export async function POST(request: Request) {
           await reply(
             `Usage: <code>/update &lt;number or keyword&gt; &lt;status&gt;</code>\n\n` +
             `<b>Examples:</b>\n/update 23 in review\n/update login blocked\n\n` +
-            `<i>Statuses: backlog · todo · in progress · in review · blocked · done</i>`
+            `<i>Valid statuses: backlog · todo · in progress · in review · blocked · done</i>`
           )
           return NextResponse.json({ ok: true })
         }
@@ -519,20 +519,20 @@ export async function POST(request: Request) {
         }
 
         if (!mappedStatus) {
-          await reply(`❌ Unknown status <b>${esc(statusRaw)}</b>\nValid: backlog · todo · in progress · in review · blocked · done`)
+          await reply(`❌ <b>${esc(statusRaw)}</b> is not a recognized status.\nValid options: backlog · todo · in progress · in review · blocked · done`)
           return NextResponse.json({ ok: true })
         }
 
         const { tasks: updTasks, ambiguous: updAmbiguous } = await findTaskByRef(ref, supabase)
         if (updTasks.length === 0) {
-          await reply(`❌ No active task found matching <b>"${esc(ref)}"</b>\n\n<i>Use /tasks to see all active tasks</i>`)
+          await reply(`❌ No active task found matching <b>"${esc(ref)}"</b>.\n\n<i>Use /tasks to see all active tasks.</i>`)
           return NextResponse.json({ ok: true })
         }
         if (updAmbiguous) {
           const list = updTasks.map(taskRefLine).join('\n')
           await reply(
-            `🔍 Found ${updTasks.length} tasks matching <b>"${esc(ref)}"</b>:\n${list}\n\n` +
-            `Be more specific or use the task number:\n<code>/update &lt;number&gt; ${statusRaw.replace(/_/g, ' ')}</code>`
+            `🔍 Multiple tasks matched <b>"${esc(ref)}"</b>:\n${list}\n\n` +
+            `Please be more specific, or use the task number:\n<code>/update &lt;number&gt; ${statusRaw.replace(/_/g, ' ')}</code>`
           )
           return NextResponse.json({ ok: true })
         }
@@ -541,7 +541,7 @@ export async function POST(request: Request) {
         const statusEmoji: Record<string, string> = {
           backlog: '📦', todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
         }
-        await reply(`${statusEmoji[mappedStatus] ?? '📌'} <b>${esc(updTask.title)}</b>\nMoved to: <b>${mappedStatus.replace(/_/g, ' ')}</b>`)
+        await reply(`${statusEmoji[mappedStatus] ?? '📌'} <b>${esc(updTask.title)}</b>\nUpdated to: <b>${mappedStatus.replace(/_/g, ' ')}</b>`)
         return NextResponse.json({ ok: true })
       }
 
@@ -556,7 +556,7 @@ export async function POST(request: Request) {
         if (hasMultipleMentions || hasNewlines || hasGroupedSegments) {
           const parsed = await parseBulkTasks(rawRest)
           if (parsed.length === 0) {
-            await reply('❌ Could not extract tasks from that text.')
+            await reply('❌ Could not extract any tasks from that message.')
             return NextResponse.json({ ok: true })
           }
           const inserts = parsed.map(t => ({
@@ -568,7 +568,7 @@ export async function POST(request: Request) {
           }))
           const { data: created, error } = await supabase.from('tasks').insert(inserts).select()
           if (error || !created) {
-            await reply('❌ Failed to create tasks.')
+            await reply('❌ Something went wrong while creating the tasks. Please try again.')
             return NextResponse.json({ ok: true })
           }
           const grouped: Record<string, string[]> = {}
@@ -580,7 +580,7 @@ export async function POST(request: Request) {
             const hasLink = t.description && /https?:\/\//.test(t.description) ? ' 🔗' : ''
             grouped[key].push(`• <code>${code}</code> ${esc(t.title)}${due}${hasLink}`)
           })
-          let msg = `✅ <b>${created.length} task${created.length > 1 ? 's' : ''} created!</b>\n\n`
+          let msg = `✅ <b>${created.length} task${created.length > 1 ? 's' : ''} added.</b>\n\n`
           Object.entries(grouped).forEach(([a, items]) => { msg += `@${esc(a)}\n${items.join('\n')}\n\n` })
           await reply(msg.trim())
           return NextResponse.json({ ok: true })
@@ -598,7 +598,7 @@ export async function POST(request: Request) {
             .insert({ title: finalTitle, status: 'todo', priority: cleaned.priority, order_index: 0, assigned_to: assignee, due_date: due })
             .select().single()
           if (error || !task) {
-            await reply('❌ Failed to create task.')
+            await reply('❌ Something went wrong while creating the task. Please try again.')
           } else {
             await reply(taskAddedMsg({ ...task, priority: cleaned.priority, due_date: due, assigned_to: assignee }))
           }
@@ -623,7 +623,7 @@ export async function POST(request: Request) {
             .insert({ title: cleaned.title, status: 'todo', priority: cleaned.priority, order_index: 0, assigned_to: assignedName, due_date: due })
             .select().single()
           if (error || !task) {
-            await reply('❌ Failed to create task.')
+            await reply('❌ Something went wrong while creating the task. Please try again.')
           } else {
             await reply(taskAddedMsg({ ...task, priority: cleaned.priority, due_date: due, assigned_to: assignedName }))
           }
@@ -664,17 +664,17 @@ export async function POST(request: Request) {
       // ── done ──
       if (intent.intent === 'done') {
         if (!intent.taskId) {
-          await reply(`❌ Which task? Use <code>/tasks</code> to find the ID, then <code>/done &lt;id&gt;</code>`)
+          await reply(`❌ Which task did you mean? Use <code>/tasks</code> to find it, then <code>/done &lt;id&gt;</code>.`)
           return NextResponse.json({ ok: true })
         }
         const task = await findTaskByPrefix(intent.taskId, supabase)
         if (!task) {
-          await reply(`❌ No task found with ID starting with <code>${intent.taskId}</code>`)
+          await reply(`❌ No task found with that ID. Use <code>/tasks</code> to see active tasks.`)
           return NextResponse.json({ ok: true })
         }
         const nt = esc(task.title)
         await supabase.from('tasks').update({ status: 'done' }).eq('id', task.id)
-        await reply(`✅ <b>${nt}</b>\nMarked as done! Great work! 🎉`)
+        await reply(`✅ <b>${nt}</b>\nMarked as done. Nice work! 🎉`)
         return NextResponse.json({ ok: true })
       }
 
@@ -682,16 +682,16 @@ export async function POST(request: Request) {
       if (intent.intent === 'update') {
         const mappedStatus = STATUS_ALIASES[intent.status] ?? (VALID_STATUSES.includes(intent.status as TaskStatus) ? intent.status as TaskStatus : null)
         if (!mappedStatus) {
-          await reply(`❌ Unknown status <b>${intent.status}</b>\nValid: todo, in progress, in review, blocked, done`)
+          await reply(`❌ <b>${intent.status}</b> is not a recognized status.\nValid options: backlog · todo · in progress · in review · blocked · done`)
           return NextResponse.json({ ok: true })
         }
         if (!intent.taskId) {
-          await reply(`🤔 Status understood as <b>${mappedStatus.replace(/_/g, ' ')}</b> — which task?\nUse <code>/tasks</code> to find the ID, then <code>/update &lt;id&gt; ${mappedStatus.replace(/_/g, ' ')}</code>`)
+          await reply(`🤔 Got it — status is <b>${mappedStatus.replace(/_/g, ' ')}</b>. Which task should be updated?\nUse <code>/tasks</code> to find it, then <code>/update &lt;id&gt; ${mappedStatus.replace(/_/g, ' ')}</code>.`)
           return NextResponse.json({ ok: true })
         }
         const task = await findTaskByPrefix(intent.taskId, supabase)
         if (!task) {
-          await reply(`❌ No task found with ID starting with <code>${intent.taskId}</code>`)
+          await reply(`❌ No task found with that ID. Use <code>/tasks</code> to see active tasks.`)
           return NextResponse.json({ ok: true })
         }
         const ut = esc(task.title)
@@ -699,7 +699,7 @@ export async function POST(request: Request) {
         const statusEmoji: Record<string, string> = {
           todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
         }
-        await reply(`${statusEmoji[mappedStatus] ?? '📌'} <b>${ut}</b>\nMoved to: <b>${mappedStatus.replace(/_/g, ' ')}</b>`)
+        await reply(`${statusEmoji[mappedStatus] ?? '📌'} <b>${ut}</b>\nUpdated to: <b>${mappedStatus.replace(/_/g, ' ')}</b>`)
         return NextResponse.json({ ok: true })
       }
 
@@ -770,16 +770,16 @@ export async function POST(request: Request) {
         for (const upd of bulkUpdates) {
           const { tasks: found, ambiguous } = await findTaskByRef(upd.taskRef, supabase)
           if (found.length === 0) {
-            results.push(`❌ <b>"${esc(upd.taskRef)}"</b> — not found`)
+            results.push(`❌ <b>"${esc(upd.taskRef)}"</b> — task not found`)
           } else if (ambiguous) {
-            results.push(`⚠️ <b>"${esc(upd.taskRef)}"</b> — multiple matches, be more specific`)
+            results.push(`⚠️ <b>"${esc(upd.taskRef)}"</b> — multiple matches found, please be more specific`)
           } else {
             await supabase.from('tasks').update({ status: upd.status }).eq('id', found[0].id)
             const emoji = statusEmoji[upd.status] ?? '📌'
             results.push(`${emoji} ${esc(found[0].title)} → <b>${upd.status.replace(/_/g, ' ')}</b>`)
           }
         }
-        await reply(`📋 <b>${bulkUpdates.length} update${bulkUpdates.length > 1 ? 's' : ''}:</b>\n${results.join('\n')}`)
+        await reply(`📋 <b>${bulkUpdates.length} update${bulkUpdates.length > 1 ? 's' : ''} applied:</b>\n${results.join('\n')}`)
         return NextResponse.json({ ok: true })
       }
     }
@@ -806,7 +806,7 @@ export async function POST(request: Request) {
             const E: Record<string, string> = {
               todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
             }
-            await reply(`${E[mapped] ?? '📌'} Got it! <b>${esc(task.title)}</b> → <b>${mapped.replace(/_/g, ' ')}</b>`)
+            await reply(`${E[mapped] ?? '📌'} Got it. <b>${esc(task.title)}</b> → <b>${mapped.replace(/_/g, ' ')}</b>`)
             return NextResponse.json({ ok: true })
           }
         }
@@ -814,8 +814,8 @@ export async function POST(request: Request) {
         // Status was understood but no matching task found — nudge the user
         if (mapped && !intent.taskId) {
           await reply(
-            `🤔 Sounds like something is <b>${mapped.replace(/_/g, ' ')}</b>.\n` +
-            `Which task? Use <code>/tasks</code> to see active tasks, then:\n` +
+            `🤔 Sounds like something is <b>${mapped.replace(/_/g, ' ')}</b>. Which task?\n` +
+            `Use <code>/tasks</code> to see active tasks, then:\n` +
             `<code>/update &lt;id&gt; ${mapped.replace(/_/g, ' ')}</code>`
           )
           return NextResponse.json({ ok: true })
@@ -826,7 +826,7 @@ export async function POST(request: Request) {
         const task = await findTaskByPrefix(intent.taskId, supabase)
         if (task) {
           await supabase.from('tasks').update({ status: 'done' }).eq('id', task.id)
-          await reply(`✅ <b>${esc(task.title)}</b> marked as done! Great work! 🎉`)
+          await reply(`✅ <b>${esc(task.title)}</b>\nMarked as done. Nice work! 🎉`)
           return NextResponse.json({ ok: true })
         }
       }
@@ -837,7 +837,7 @@ export async function POST(request: Request) {
 
     // ── Unknown slash command — silently ignore regular chat ──────────
     if (cmd.startsWith('/')) {
-      await reply(`❓ Unknown command. Send /help to see what I can do.`)
+      await reply(`❓ Unknown command. Try /help to see what's available.`)
     }
     return NextResponse.json({ ok: true })
 
