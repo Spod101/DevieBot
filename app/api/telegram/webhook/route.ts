@@ -135,6 +135,35 @@ async function resolveName(username: string, supabase: ReturnType<typeof createS
   return data?.name ?? data?.telegram_username ?? username
 }
 
+function assigneeKey(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase().replace(/^@+/, '')
+}
+
+async function resolveAssigneeAliases(
+  username: string,
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<{ label: string; aliases: string[] }> {
+  const { data } = await supabase
+    .from('members')
+    .select('name, telegram_username')
+    .ilike('telegram_username', username)
+    .maybeSingle()
+
+  const aliases = new Set<string>()
+  aliases.add(assigneeKey(username))
+  aliases.add(assigneeKey(`@${username}`))
+  if (data?.telegram_username) {
+    aliases.add(assigneeKey(data.telegram_username))
+    aliases.add(assigneeKey(`@${data.telegram_username}`))
+  }
+  if (data?.name) aliases.add(assigneeKey(data.name))
+
+  return {
+    label: data?.name ?? data?.telegram_username ?? username,
+    aliases: [...aliases].filter(Boolean),
+  }
+}
+
 // Detect a member name embedded at the end of a task title (no @ used).
 // Tries the last 2 words as a full name first, then the last single word as
 // a first-name match (exact or "FirstName LastName" prefix).
@@ -348,23 +377,24 @@ export async function POST(request: Request) {
     // ── /tasks [@name ...] ──────────────────────────────────────────
     if (cmd === '/tasks') {
       const mentionedUsers = [...rest.matchAll(/@(\w+)/g)].map(m => m[1].toLowerCase())
-      const resolvedNames = await Promise.all(mentionedUsers.map(u => resolveName(u, supabase)))
+      const resolvedUsers = await Promise.all(mentionedUsers.map(u => resolveAssigneeAliases(u, supabase)))
+      const resolvedNames = resolvedUsers.map(u => u.label)
 
       let query = supabase
         .from('tasks')
         .select('id, task_number, title, status, priority, assigned_to')
         .neq('status', 'done')
         .order('status')
-        .limit(50)
-
-      if (resolvedNames.length === 1) {
-        query = query.ilike('assigned_to', resolvedNames[0])
-      } else if (resolvedNames.length > 1) {
-        query = query.in('assigned_to', resolvedNames)
-      }
+        .limit(200)
 
       const { data: tasks } = await query
-      const filtered = tasks ?? []
+      const aliasSets = resolvedUsers.map(u => new Set(u.aliases.map(assigneeKey)))
+      const filtered = (tasks ?? []).filter((task: any) => {
+        if (!aliasSets.length) return true
+        const key = assigneeKey(task.assigned_to)
+        if (!key) return false
+        return aliasSets.some(set => set.has(key))
+      })
 
       if (filtered.length === 0) {
         const who = resolvedNames.length ? ` for ${resolvedNames.join(', ')}` : ''
