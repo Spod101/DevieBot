@@ -1,117 +1,206 @@
 import { createServiceClient } from '@/lib/supabase/service'
 
-const DIV = '─────────────────────'
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export type StandupFilter = 'overview' | 'active' | 'backlog' | 'done'
+
+export const VALID_STANDUP_FILTERS = new Set<StandupFilter>([
+  'overview', 'active', 'backlog', 'done',
+])
+
+const ACTIVE_STATUSES = new Set(['in_progress', 'in_review', 'blocked', 'todo'])
+
+const STATUS_EMOJI: Record<string, string> = {
+  blocked: '🚧', in_progress: '🔄', in_review: '👀', todo: '📝', backlog: '📦', done: '✅',
+}
+const STATUS_LABEL: Record<string, string> = {
+  blocked: 'Blocked', in_progress: 'In Progress', in_review: 'In Review',
+  todo: 'To Do', backlog: 'Backlog', done: 'Done',
+}
+const STATUS_ORDER = ['blocked', 'in_progress', 'in_review', 'todo', 'backlog', 'done']
 
 const PRIORITY_BADGE: Record<string, string> = {
-  urgent: ' 🔴 URGENT',
-  high:   ' 🟠 HIGH',
-  medium: '',
-  low:    '',
+  urgent: ' 🔴', high: ' 🟠', medium: '', low: '',
 }
 
-export async function generateStandupMessage(): Promise<string> {
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function taskLine(t: any): string {
+  const code     = t.task_number ? `<code>T-${String(t.task_number).padStart(3, '0')}</code> ` : ''
+  const title    = esc(t.title)
+  const badge    = PRIORITY_BADGE[t.priority] ?? ''
+  const assignee = t.assigned_to ? ` — ${esc(t.assigned_to)}` : ''
+  const due      = t.due_date
+    ? ` · ${new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    : ''
+  return `▸ ${code}${title}${badge}${assignee}${due}`
+}
+
+function greeting(): string {
+  const hour = parseInt(
+    new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila', hour: 'numeric', hour12: false })
+  )
+  if (hour < 12) return `Good morning, team! Let's make today count. 🌅`
+  if (hour < 17) return `Good afternoon, team! Here's a quick look at the board. ☀️`
+  return `Good evening, team! Here's your end-of-day update. 🌙`
+}
+
+// ── Data ──────────────────────────────────────────────────────────────────────
+
+export type StandupData = {
+  dateStr:     string
+  overdue:     any[]
+  blocked:     any[]
+  inProgress:  any[]
+  inReview:    any[]
+  todo:        any[]
+  backlog:     any[]
+  done:        any[]
+  activeCount: number
+  doneCount:   number
+}
+
+export async function fetchStandupData(): Promise<StandupData> {
   const supabase = createServiceClient()
 
   const { data, error } = await supabase
     .from('tasks')
-    .select('id, task_number, title, status, priority, due_date, assigned_to, updated_at')
+    .select('id, task_number, title, status, priority, due_date, assigned_to')
     .order('priority', { ascending: false })
 
   if (error) console.error('[standup] tasks query error:', error.message)
 
-  const rawTasks: any[] = data || []
-
+  const tasks: any[] = data || []
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-
-  const tasks = rawTasks.map(t => ({
-    ...t,
-    _assignee: t.assigned_to ? `@${t.assigned_to}` : null,
-  }))
-
-  const backlogTasks = tasks.filter(t => t.status === 'backlog')
-  const todoTasks    = tasks.filter(t => t.status === 'todo')
-  const inProgress   = tasks.filter(t => t.status === 'in_progress')
-  const inReview     = tasks.filter(t => t.status === 'in_review')
-  const blocked      = tasks.filter(t => t.status === 'blocked')
-  const doneTasks    = tasks.filter(t => t.status === 'done')
-  const overdue      = tasks.filter(t =>
-    t.due_date && new Date(t.due_date) < today && t.status !== 'done'
-  )
-  const activeTasks  = tasks.filter(t => t.status !== 'done')
 
   const dateStr = today.toLocaleDateString('en-PH', {
     timeZone: 'Asia/Manila',
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   })
 
-  const h = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const overdue    = tasks.filter(t => t.due_date && new Date(t.due_date) < today && t.status !== 'done')
+  const blocked    = tasks.filter(t => t.status === 'blocked')
+  const inProgress = tasks.filter(t => t.status === 'in_progress')
+  const inReview   = tasks.filter(t => t.status === 'in_review')
+  const todo       = tasks.filter(t => t.status === 'todo')
+  const backlog    = tasks.filter(t => t.status === 'backlog')
+  const done       = tasks.filter(t => t.status === 'done')
 
-  function taskLine(t: any): string {
-    const code     = t.task_number ? `<code>T-${String(t.task_number).padStart(3, '0')}</code> ` : ''
-    const title    = h(t.title)
-    const badge    = PRIORITY_BADGE[t.priority] ?? ''
-    const assignee = t._assignee ? ` — ${h(t._assignee)}` : ''
-    const due      = t.due_date
-      ? ` · ${new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-      : ''
-    return `▸ ${code}${title}${badge}${assignee}${due}`
+  return {
+    dateStr, overdue, blocked, inProgress, inReview, todo, backlog, done,
+    activeCount: blocked.length + inProgress.length + inReview.length + todo.length,
+    doneCount:   done.length,
   }
-
-  function section(icon: string, label: string, items: any[], limit = 10): string {
-    if (items.length === 0) return ''
-    let s = `\n\n${icon} <b>${label}</b> <i>(${items.length})</i>\n`
-    s += `${DIV}\n`
-    items.slice(0, limit).forEach(t => { s += taskLine(t) + '\n' })
-    if (items.length > limit) s += `<i>...and ${items.length - limit} more</i>\n`
-    return s
-  }
-
-  let msg = ''
-
-  msg += `📋 <b>DEVCON COHORT 4 — Daily Stand Up</b>\n`
-  msg += `<i>${h(dateStr)}</i>\n`
-
-  msg += `\n📊 <b>Overview</b>\n`
-  msg += `${DIV}\n`
-  msg += `📌 Active Tasks: <b>${activeTasks.length}</b>\n`
-  msg += `✅ Done: <b>${doneTasks.length}</b>\n`
-  msg += `🚧 Blocked: <b>${blocked.length}</b>\n`
-  msg += `⏰ Overdue: <b>${overdue.length}</b>\n`
-
-  msg += section('⏰', 'Overdue',      overdue,      5)
-  msg += section('🚧', 'Blocked',      blocked,     10)
-  msg += section('🔄', 'In Progress',  inProgress,  10)
-  msg += section('👀', 'In Review',    inReview,     8)
-  msg += section('📝', 'To Do',        todoTasks,   10)
-  msg += section('📦', 'Backlog',      backlogTasks, 10)
-  msg += section('✅', 'Done',         doneTasks,   10)
-
-  msg += `\n\n📋 <b>Summary</b>\n`
-  msg += `${DIV}\n`
-  msg += `✅ Done: ${doneTasks.length}\n`
-  msg += `🔄 In Progress: ${inProgress.length}\n`
-  msg += `👀 In Review: ${inReview.length}\n`
-  msg += `📝 To Do: ${todoTasks.length}\n`
-  msg += `📦 Backlog: ${backlogTasks.length}\n`
-  msg += `🚧 Blocked: ${blocked.length}\n`
-  msg += `⏰ Overdue: ${overdue.length}\n`
-  msg += `\n<i>Let's make it a productive day. 💪</i>`
-
-  return msg
 }
+
+// ── Page builder ─────────────────────────────────────────────────────────────
+
+export function buildStandupPage(
+  data: StandupData,
+  filter: StandupFilter,
+  _page: number,   // unused — no member pagination for DSU
+): { text: string; keyboard: object } {
+  const header =
+    `${greeting()}\n\n` +
+    `📋 <b>DEVCON COHORT 4 — Daily Stand Up</b>\n` +
+    `<i>${esc(data.dateStr)}</i>`
+
+  let text = ''
+
+  if (filter === 'overview') {
+    text = `${header}\n\n`
+    text += `📊 <b>Overview</b>\n`
+    text += `📌 Active: <b>${data.activeCount}</b>   ✅ Done: <b>${data.doneCount}</b>\n`
+    text += `🚧 Blocked: <b>${data.blocked.length}</b>   ⏰ Overdue: <b>${data.overdue.length}</b>`
+
+    if (data.overdue.length > 0) {
+      text += `\n\n⏰ <b>Overdue</b>\n`
+      data.overdue.slice(0, 5).forEach(t => { text += taskLine(t) + '\n' })
+      if (data.overdue.length > 5) text += `<i>...and ${data.overdue.length - 5} more</i>`
+    }
+
+    if (data.blocked.length > 0) {
+      text += `\n\n🚧 <b>Blocked</b>\n`
+      data.blocked.slice(0, 5).forEach(t => { text += taskLine(t) + '\n' })
+      if (data.blocked.length > 5) text += `<i>...and ${data.blocked.length - 5} more</i>`
+    }
+
+  } else if (filter === 'active') {
+    const sections: [string, any[]][] = [
+      ['🔄', data.inProgress],
+      ['👀', data.inReview],
+      ['📝', data.todo],
+    ]
+    text = `${header}\n\n🔄 <b>Active</b> <i>(${data.activeCount})</i>`
+    if (data.activeCount === 0) {
+      text += `\n\n<i>No active tasks right now.</i>`
+    } else {
+      for (const [emoji, tasks] of sections) {
+        if (!tasks.length) continue
+        const status = emoji === '🔄' ? 'in_progress' : emoji === '👀' ? 'in_review' : 'todo'
+        text += `\n\n${emoji} <i>${STATUS_LABEL[status]}</i>\n`
+        tasks.slice(0, 10).forEach(t => { text += taskLine(t) + '\n' })
+        if (tasks.length > 10) text += `<i>...and ${tasks.length - 10} more</i>`
+      }
+    }
+
+  } else if (filter === 'backlog') {
+    text = `${header}\n\n📦 <b>Backlog</b> <i>(${data.backlog.length})</i>`
+    if (data.backlog.length === 0) {
+      text += `\n\n<i>Backlog is clear!</i>`
+    } else {
+      text += '\n'
+      data.backlog.slice(0, 15).forEach(t => { text += taskLine(t) + '\n' })
+      if (data.backlog.length > 15) text += `<i>...and ${data.backlog.length - 15} more</i>`
+    }
+
+  } else {
+    // done
+    text = `${header}\n\n✅ <b>Done</b> <i>(${data.doneCount})</i>`
+    if (data.doneCount === 0) {
+      text += `\n\n<i>Nothing marked done yet.</i>`
+    } else {
+      text += '\n'
+      data.done.slice(0, 15).forEach(t => { text += taskLine(t) + '\n' })
+      if (data.done.length > 15) text += `<i>...and ${data.done.length - 15} more</i>`
+    }
+  }
+
+  return { text: text.trimEnd(), keyboard: buildKeyboard(data, filter) }
+}
+
+function buildKeyboard(data: StandupData, active: StandupFilter): object {
+  const btn = (f: StandupFilter, label: string) => ({
+    text: f === active ? `· ${label}` : label,
+    callback_data: `standup|${f}|0`,
+  })
+
+  return {
+    inline_keyboard: [[
+      btn('overview', '📊 Overview'),
+      btn('active',   `Active (${data.activeCount})`),
+      btn('backlog',  `Backlog (${data.backlog.length})`),
+      btn('done',     `Done (${data.doneCount})`),
+    ]],
+  }
+}
+
+// ── Send helpers ──────────────────────────────────────────────────────────────
 
 export interface SendOptions {
   replyToMessageId?: number
+  keyboard?: object
 }
 
 export async function sendTelegramMessage(
   text: string,
   options: SendOptions = {}
 ): Promise<{ ok: boolean; error?: string }> {
-  const envToken = process.env.TELEGRAM_BOT_TOKEN
-  const envChatId = process.env.TELEGRAM_CHAT_ID
-
   const supabase = createServiceClient()
   const { data } = await supabase
     .from('telegram_config')
@@ -119,39 +208,36 @@ export async function sendTelegramMessage(
     .limit(1)
     .single()
 
-  // Prefer dashboard-saved values; fall back to env vars for legacy setups.
-  const token = data?.bot_token?.trim() || envToken
-  const chatId = data?.chat_id?.trim() || envChatId
+  const token  = data?.bot_token?.trim() || process.env.TELEGRAM_BOT_TOKEN
+  const chatId = data?.chat_id?.trim()   || process.env.TELEGRAM_CHAT_ID
 
-  if (!token || !chatId) {
-    return { ok: false, error: 'Telegram not configured' }
-  }
+  if (!token || !chatId) return { ok: false, error: 'Telegram not configured' }
 
-  return sendMessage(token, chatId, text, options)
-}
-
-async function sendMessage(
-  token: string,
-  chatId: string,
-  text: string,
-  options: SendOptions = {}
-) {
   const payload: Record<string, unknown> = {
-    chat_id:    chatId,
-    text,
-    parse_mode: 'HTML',
+    chat_id: chatId, text, parse_mode: 'HTML',
     allow_sending_without_reply: true,
   }
-  if (options.replyToMessageId) {
-    payload.reply_to_message_id = options.replyToMessageId
-  }
+  if (options.replyToMessageId) payload.reply_to_message_id = options.replyToMessageId
+  if (options.keyboard)         payload.reply_markup = options.keyboard
 
-  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify(payload),
+  const res  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   })
-  const data = await res.json()
-  if (!data.ok) return { ok: false, error: data.description }
+  const body = await res.json()
+  if (!body.ok) return { ok: false, error: body.description }
   return { ok: true }
+}
+
+/** Send the standup overview card with section filter buttons. */
+export async function sendStandupReport(options: { replyToMessageId?: number } = {}) {
+  const data = await fetchStandupData()
+  const { text, keyboard } = buildStandupPage(data, 'overview', 0)
+  return sendTelegramMessage(text, { ...options, keyboard })
+}
+
+/** Kept for any legacy callers. */
+export async function generateStandupMessage(): Promise<string> {
+  const data = await fetchStandupData()
+  return buildStandupPage(data, 'overview', 0).text
 }

@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { generateStandupMessage, sendTelegramMessage } from '@/lib/standup'
+import {
+  fetchStandupData, buildStandupPage, sendStandupReport, sendTelegramMessage,
+  VALID_STANDUP_FILTERS, type StandupFilter,
+} from '@/lib/standup'
 import { parseBulkTasks, parseMessage, parseStatus, cleanTaskTitle } from '@/lib/nlp'
 import type { TaskStatus } from '@/types/database'
 
@@ -129,7 +132,7 @@ async function fetchTaskPages(
   roleFilter: string,
   assigneeFilter: string | null,
   supabase: ReturnType<typeof createServiceClient>,
-): Promise<TaskPage[]> {
+): Promise<{ pages: TaskPage[]; allRoles: string[] }> {
   const { data: tasks } = await supabase
     .from('tasks')
     .select('id, task_number, title, status, priority, assigned_to')
@@ -140,6 +143,15 @@ async function fetchTaskPages(
   const { data: memberRows } = await supabase
     .from('members')
     .select('name, telegram_username, role')
+
+  // Collect all distinct non-empty roles from the members table
+  const allRoles = [...new Set(
+    (memberRows ?? []).map(m => m.role ?? '').filter(Boolean)
+  )].sort((a, b) => {
+    if (a === 'admin') return -1
+    if (b === 'admin') return 1
+    return a.localeCompare(b)
+  })
 
   // Build lookup: assigneeKey → { display, role }
   const memberMap = new Map<string, { display: string; role: string }>()
@@ -173,19 +185,36 @@ async function fetchTaskPages(
   }
 
   // Sort: admin first, then alphabetically by role, then by name within each role
-  return [...memberBuckets.values()].sort((a, b) => {
+  const pages = [...memberBuckets.values()].sort((a, b) => {
     if (a.role === 'admin' && b.role !== 'admin') return -1
     if (b.role === 'admin' && a.role !== 'admin') return 1
     if (a.role !== b.role) return a.role.localeCompare(b.role)
     return a.name.localeCompare(b.name)
   })
+
+  return { pages, allRoles }
 }
 
-function buildTasksPage(pages: TaskPage[], page: number, roleFilter: string): { text: string; keyboard: object } {
+function buildTasksPage(
+  pages: TaskPage[], page: number, roleFilter: string, allRoles: string[],
+): { text: string; keyboard: object } {
   const total   = pages.length
   const current = pages[Math.max(0, Math.min(page, total - 1))]
 
   const roleDisplay = roleFilter === 'all' ? '' : ` — ${roleFilter}`
+
+  if (total === 0) {
+    const label = (r: string) => r === 'all' ? 'All' : r
+    const filterRow = ['all', ...allRoles].map(f => ({
+      text: f === roleFilter ? `· ${label(f)}` : label(f),
+      callback_data: `tasks|${f}|0`,
+    }))
+    return {
+      text: `📋 <b>Tasks${roleDisplay}</b>\n\n<i>No active tasks for this filter.</i>`,
+      keyboard: { inline_keyboard: [filterRow] },
+    }
+  }
+
   let text = `📋 <b>Tasks${roleDisplay}</b>\n`
   text += `👤 <b>${esc(current.name)}</b>  <i>(${page + 1} / ${total})</i>\n`
   text += `─────────────────────\n`
@@ -200,10 +229,9 @@ function buildTasksPage(pages: TaskPage[], page: number, roleFilter: string): { 
   }
   if (!hasAny) text += '\n<i>No active tasks.</i>\n'
 
-  // Filter row — dynamically built from roles present in pages
-  const uniqueRoles = ['all', ...new Set(pages.map(p => p.role).filter(Boolean))]
+  // Filter row — all known roles from the members table
   const label = (r: string) => r === 'all' ? 'All' : r
-  const filterRow = uniqueRoles.map(f => ({
+  const filterRow = ['all', ...allRoles].map(f => ({
     text: f === roleFilter ? `· ${label(f)}` : label(f),
     callback_data: `tasks|${f}|0`,
   }))
@@ -441,15 +469,28 @@ export async function POST(request: Request) {
         const [, roleFilter, pageStr] = data.split('|')
         const page = parseInt(pageStr, 10)
         if (!isNaN(page)) {
-          const pages = await fetchTaskPages(roleFilter, null, supabase)
-          if (pages.length === 0) {
-            await answerCbq(token, cbq.id)
-            return NextResponse.json({ ok: true })
-          }
+          const { pages, allRoles } = await fetchTaskPages(roleFilter, null, supabase)
           const safePage = Math.max(0, Math.min(page, pages.length - 1))
-          const { text, keyboard } = buildTasksPage(pages, safePage, roleFilter)
+          const { text, keyboard } = buildTasksPage(pages, safePage, roleFilter, allRoles)
           const edited = await editWithKeyboard(token, chatId, msgId, text, keyboard)
-          // Fallback: if edit fails (e.g. too old to edit), send a fresh message
+          if (!edited) {
+            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: keyboard }),
+            })
+          }
+        }
+      }
+
+      if (token && data.startsWith('standup|') && chatId && msgId) {
+        const [, filterRaw, pageStr] = data.split('|')
+        const filter = filterRaw as StandupFilter
+        const page   = parseInt(pageStr ?? '0', 10)
+        if (VALID_STANDUP_FILTERS.has(filter) && !isNaN(page)) {
+          const standupData = await fetchStandupData()
+          const { text, keyboard } = buildStandupPage(standupData, filter, page)
+          const edited = await editWithKeyboard(token, chatId, msgId, text, keyboard)
           if (!edited) {
             await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
               method: 'POST',
@@ -573,8 +614,15 @@ export async function POST(request: Request) {
 
     // ── /standup ──────────────────────────────────────────────────────
     if (cmd === '/standup') {
-      const msg = await generateStandupMessage()
-      await sendTelegramMessage(msg, { replyToMessageId: messageId })
+      const standupData = await fetchStandupData()
+      const { text, keyboard } = buildStandupPage(standupData, 'overview', 0)
+      const token  = await getToken(supabase)
+      const chatId = message.chat?.id as number
+      if (token && chatId) {
+        await sendWithKeyboard(token, chatId, text, keyboard, messageId)
+      } else {
+        await reply(text)
+      }
       return NextResponse.json({ ok: true })
     }
 
@@ -593,22 +641,19 @@ export async function POST(request: Request) {
         ? restTrimmed
         : 'all'
 
-      const pages = await fetchTaskPages(roleFilter, assigneeFilter, supabase)
+      const { pages, allRoles } = await fetchTaskPages(roleFilter, assigneeFilter, supabase)
 
-      if (pages.length === 0) {
-        const who = resolvedUser ? ` for ${resolvedUser.label}` : roleFilter !== 'all' ? ` in ${roleFilter}` : ''
-        await reply(`📋 No active tasks found${who}.`)
-        return NextResponse.json({ ok: true })
-      }
-
-      const token   = await getToken(supabase)
-      const chatId  = message.chat?.id as number
-      const { text, keyboard } = buildTasksPage(pages, 0, roleFilter)
+      const token  = await getToken(supabase)
+      const chatId = message.chat?.id as number
+      const { text, keyboard } = buildTasksPage(pages, 0, roleFilter, allRoles)
 
       if (token && chatId) {
         await sendWithKeyboard(token, chatId, text, keyboard, messageId)
       } else {
-        await reply(text)
+        await reply(pages.length === 0
+          ? `📋 No active tasks${roleFilter !== 'all' ? ` in ${roleFilter}` : ''}.`
+          : text
+        )
       }
       return NextResponse.json({ ok: true })
     }
