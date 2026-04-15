@@ -82,8 +82,8 @@ async function sendWithKeyboard(
 async function editWithKeyboard(
   token: string, chatId: number, messageId: number,
   text: string, keyboard: object,
-) {
-  await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+): Promise<boolean> {
+  const res = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -91,6 +91,14 @@ async function editWithKeyboard(
       text, parse_mode: 'HTML', reply_markup: keyboard,
     }),
   })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    // "message is not modified" (400) is expected when clicking the same page — not an error
+    if (body?.description?.includes('message is not modified')) return true
+    console.error('[editWithKeyboard] Telegram error:', body?.description ?? res.status)
+    return false
+  }
+  return true
 }
 
 async function answerCbq(token: string, id: string) {
@@ -427,6 +435,8 @@ export async function POST(request: Request) {
       const msgId        = cbq.message?.message_id as number
       const token        = await getToken(supabase)
 
+      console.log(`[cbq] id=${cbq.id} data="${data}" chatId=${chatId} msgId=${msgId} hasToken=${!!token}`)
+
       if (token && data.startsWith('tasks|') && chatId && msgId) {
         const [, roleFilter, pageStr] = data.split('|')
         const page = parseInt(pageStr, 10)
@@ -438,7 +448,15 @@ export async function POST(request: Request) {
           }
           const safePage = Math.max(0, Math.min(page, pages.length - 1))
           const { text, keyboard } = buildTasksPage(pages, safePage, roleFilter)
-          await editWithKeyboard(token, chatId, msgId, text, keyboard)
+          const edited = await editWithKeyboard(token, chatId, msgId, text, keyboard)
+          // Fallback: if edit fails (e.g. too old to edit), send a fresh message
+          if (!edited) {
+            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: keyboard }),
+            })
+          }
         }
       }
 

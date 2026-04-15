@@ -21,7 +21,7 @@ export async function POST() {
     const res = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message', 'chat_member', 'my_chat_member'] }),
+      body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message', 'callback_query', 'chat_member', 'my_chat_member'] }),
     })
     const data = await res.json()
     return NextResponse.json(data)
