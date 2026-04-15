@@ -14,6 +14,7 @@ export interface Member {
   telegram_id: string | null
   telegram_username: string | null
   name: string | null      // first_name + last_name from Telegram (always available)
+  cohort: string | null    // 'cohort3' | 'cohort4'
   created_at: string
 }
 

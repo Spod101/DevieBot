@@ -56,6 +56,163 @@ function taskAddedMsg(task: {
 }
 
 
+// ── Telegram API helpers ──────────────────────────────────────────────────────
+
+async function getToken(supabase: ReturnType<typeof createServiceClient>): Promise<string | null> {
+  const { data } = await supabase.from('telegram_config').select('bot_token').limit(1).single()
+  return data?.bot_token?.trim() || process.env.TELEGRAM_BOT_TOKEN || null
+}
+
+async function sendWithKeyboard(
+  token: string, chatId: number, text: string,
+  keyboard: object, replyToMessageId?: number,
+) {
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId, text, parse_mode: 'HTML',
+      reply_markup: keyboard,
+      reply_to_message_id: replyToMessageId,
+      allow_sending_without_reply: true,
+    }),
+  })
+}
+
+async function editWithKeyboard(
+  token: string, chatId: number, messageId: number,
+  text: string, keyboard: object,
+) {
+  await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId, message_id: messageId,
+      text, parse_mode: 'HTML', reply_markup: keyboard,
+    }),
+  })
+}
+
+async function answerCbq(token: string, id: string) {
+  await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: id }),
+  })
+}
+
+// ── /tasks pagination helpers ─────────────────────────────────────────────────
+
+const TASK_STATUS_EMOJI: Record<string, string> = {
+  backlog: '📦', todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧',
+}
+const TASK_STATUS_LABEL: Record<string, string> = {
+  backlog: 'Backlog', todo: 'To Do', in_progress: 'In Progress',
+  in_review: 'In Review', blocked: 'Blocked',
+}
+const TASK_STATUS_ORDER = ['blocked', 'in_progress', 'in_review', 'todo', 'backlog']
+const COHORT_LABEL: Record<string, string> = { all: 'All', cohort4: 'Cohort 4', cohort3: 'Cohort 3' }
+
+type TaskPage = {
+  name: string
+  cohort: string
+  byStatus: Record<string, string[]>
+}
+
+async function fetchTaskPages(
+  cohortFilter: string,
+  assigneeFilter: string | null,
+  supabase: ReturnType<typeof createServiceClient>,
+): Promise<TaskPage[]> {
+  const { data: tasks } = await supabase
+    .from('tasks')
+    .select('id, task_number, title, status, priority, assigned_to')
+    .neq('status', 'done')
+    .order('priority', { ascending: false })
+    .limit(200)
+
+  const { data: memberRows } = await supabase
+    .from('members')
+    .select('name, telegram_username, cohort')
+
+  // Build lookup: assigneeKey → { display, cohort }
+  const memberMap = new Map<string, { display: string; cohort: string }>()
+  for (const m of (memberRows ?? [])) {
+    const display = m.name ?? m.telegram_username ?? ''
+    const cohort  = m.cohort ?? 'cohort4'
+    if (m.name)              memberMap.set(assigneeKey(m.name),              { display, cohort })
+    if (m.telegram_username) memberMap.set(assigneeKey(m.telegram_username), { display, cohort })
+  }
+
+  // Group tasks by member → status
+  const memberBuckets = new Map<string, { display: string; cohort: string; byStatus: Record<string, string[]> }>()
+
+  for (const t of (tasks ?? [])) {
+    const key    = assigneeKey(t.assigned_to ?? '')
+    const info   = t.assigned_to ? memberMap.get(key) : null
+    const cohort = info?.cohort ?? 'cohort4'
+    const name   = info?.display ?? t.assigned_to ?? '(Unassigned)'
+
+    // Apply filters
+    if (cohortFilter !== 'all' && cohort !== cohortFilter) continue
+    if (assigneeFilter && assigneeKey(name) !== assigneeFilter) continue
+
+    const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
+    const line = `  • <code>${code}</code> ${esc(t.title)}`
+
+    if (!memberBuckets.has(name)) memberBuckets.set(name, { display: name, cohort, byStatus: {} })
+    const bucket = memberBuckets.get(name)!
+    if (!bucket.byStatus[t.status]) bucket.byStatus[t.status] = []
+    bucket.byStatus[t.status].push(line)
+  }
+
+  // Sort: cohort4 first, then cohort3, then alphabetically within each cohort
+  return [...memberBuckets.values()].sort((a, b) => {
+    if (a.cohort !== b.cohort) return a.cohort < b.cohort ? -1 : 1   // cohort4 < cohort3 alphabetically
+    return a.display.localeCompare(b.display)
+  })
+}
+
+function buildTasksPage(pages: TaskPage[], page: number, cohortFilter: string): { text: string; keyboard: object } {
+  const total   = pages.length
+  const current = pages[Math.max(0, Math.min(page, total - 1))]
+
+  const cohortDisplay = cohortFilter === 'all' ? '' : ` — ${COHORT_LABEL[cohortFilter]}`
+  let text = `📋 <b>Tasks${cohortDisplay}</b>\n`
+  text += `👤 <b>${esc(current.name)}</b>  <i>(${page + 1} / ${total})</i>\n`
+  text += `─────────────────────\n`
+
+  let hasAny = false
+  for (const status of TASK_STATUS_ORDER) {
+    const lines = current.byStatus[status]
+    if (!lines?.length) continue
+    hasAny = true
+    text += `\n${TASK_STATUS_EMOJI[status]} <i>${TASK_STATUS_LABEL[status]}</i>\n`
+    text += lines.join('\n') + '\n'
+  }
+  if (!hasAny) text += '\n<i>No active tasks.</i>\n'
+
+  // Filter row
+  const filterRow = (['all', 'cohort4', 'cohort3'] as const).map(f => ({
+    text: f === cohortFilter ? `· ${COHORT_LABEL[f]}` : COHORT_LABEL[f],
+    callback_data: `tasks|${f}|0`,
+  }))
+
+  // Nav row — only show if more than 1 page
+  const keyboard: { inline_keyboard: object[][] } = { inline_keyboard: [filterRow] }
+  if (total > 1) {
+    const prev = page > 0 ? page - 1 : total - 1
+    const next = page < total - 1 ? page + 1 : 0
+    keyboard.inline_keyboard.push([
+      { text: '◀ Prev', callback_data: `tasks|${cohortFilter}|${prev}` },
+      { text: `${page + 1} / ${total}`, callback_data: `tasks|${cohortFilter}|${page}` },
+      { text: 'Next ▶', callback_data: `tasks|${cohortFilter}|${next}` },
+    ])
+  }
+
+  return { text, keyboard }
+}
+
 const VALID_STATUSES: TaskStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done']
 const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent']
 
@@ -259,6 +416,33 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true })
     }
 
+    // ── Inline keyboard callback (tasks pagination) ──────────────────────
+    const cbq = body?.callback_query
+    if (cbq) {
+      const data: string = cbq.data ?? ''
+      const chatId       = cbq.message?.chat?.id as number
+      const msgId        = cbq.message?.message_id as number
+      const token        = await getToken(supabase)
+
+      if (token && data.startsWith('tasks|') && chatId && msgId) {
+        const [, cohortFilter, pageStr] = data.split('|')
+        const page = parseInt(pageStr, 10)
+        if (!isNaN(page)) {
+          const pages = await fetchTaskPages(cohortFilter, null, supabase)
+          if (pages.length === 0) {
+            await answerCbq(token, cbq.id)
+            return NextResponse.json({ ok: true })
+          }
+          const safePage = Math.max(0, Math.min(page, pages.length - 1))
+          const { text, keyboard } = buildTasksPage(pages, safePage, cohortFilter)
+          await editWithKeyboard(token, chatId, msgId, text, keyboard)
+        }
+      }
+
+      if (token) await answerCbq(token, cbq.id)
+      return NextResponse.json({ ok: true })
+    }
+
     const message = body?.message
     if (!message?.text) return NextResponse.json({ ok: true })
 
@@ -292,7 +476,10 @@ export async function POST(request: Request) {
       await reply(
         `🤖 <b>Devie — Available Commands</b>\n\n` +
         `📋 <b>View</b>\n` +
-        `/tasks — list your active tasks\n` +
+        `/tasks — browse tasks by member (paginated)\n` +
+        `/tasks cohort4 — filter by Cohort 4\n` +
+        `/tasks cohort3 — filter by Cohort 3\n` +
+        `/tasks @name — filter by member\n` +
         `/deadlines — show upcoming deadlines\n` +
         `/standup — send the standup report\n\n` +
         `➕ <b>Create</b>\n` +
@@ -371,57 +558,36 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    // ── /tasks [@name ...] ──────────────────────────────────────────
+    // ── /tasks [cohort3|cohort4|@name] ─────────────────────────────────
     if (cmd === '/tasks') {
+      // Detect team filter: /tasks cohort4  or  /tasks cohort3
+      const teamFilter = ['cohort4', 'cohort3'].find(c => rest.toLowerCase().includes(c)) ?? null
+
+      // Detect member filter: /tasks @name
       const mentionedUsers = [...rest.matchAll(/@(\w+)/g)].map(m => m[1].toLowerCase())
-      const resolvedUsers = await Promise.all(mentionedUsers.map(u => resolveAssigneeAliases(u, supabase)))
-      const resolvedNames = resolvedUsers.map(u => u.label)
+      const resolvedUser   = mentionedUsers.length
+        ? await resolveAssigneeAliases(mentionedUsers[0], supabase)
+        : null
+      const assigneeFilter = resolvedUser ? assigneeKey(resolvedUser.label) : null
 
-      let query = supabase
-        .from('tasks')
-        .select('id, task_number, title, status, priority, assigned_to')
-        .neq('status', 'done')
-        .order('status')
-        .limit(200)
+      const cohortFilter = teamFilter ?? 'all'
+      const pages = await fetchTaskPages(cohortFilter, assigneeFilter, supabase)
 
-      const { data: tasks } = await query
-      const aliasSets = resolvedUsers.map(u => new Set(u.aliases.map(assigneeKey)))
-      const filtered = (tasks ?? []).filter((task: any) => {
-        if (!aliasSets.length) return true
-        const key = assigneeKey(task.assigned_to)
-        if (!key) return false
-        return aliasSets.some(set => set.has(key))
-      })
-
-      if (filtered.length === 0) {
-        const who = resolvedNames.length ? ` for ${resolvedNames.join(', ')}` : ''
+      if (pages.length === 0) {
+        const who = resolvedUser ? ` for ${resolvedUser.label}` : teamFilter ? ` in ${COHORT_LABEL[teamFilter]}` : ''
         await reply(`📋 No active tasks found${who}.`)
         return NextResponse.json({ ok: true })
       }
 
-      const labels: Record<string, string> = {
-        todo: '📝 To Do', in_progress: '🔄 In Progress',
-        in_review: '👀 In Review', blocked: '🚧 Blocked',
+      const token   = await getToken(supabase)
+      const chatId  = message.chat?.id as number
+      const { text, keyboard } = buildTasksPage(pages, 0, cohortFilter)
+
+      if (token && chatId) {
+        await sendWithKeyboard(token, chatId, text, keyboard, messageId)
+      } else {
+        await reply(text)
       }
-
-      const who = resolvedNames.length ? ` · ${resolvedNames.join(', ')}` : ''
-      let msg = `📋 <b>Tasks${who}</b>\n\n`
-
-      const grouped: Record<string, string[]> = {}
-      filtered.forEach((t: any) => {
-        if (!grouped[t.status]) grouped[t.status] = []
-        const assignee = !resolvedNames.length && t.assigned_to ? ` — ${esc(t.assigned_to)}` : ''
-        const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
-        grouped[t.status].push(`• <code>${code}</code> ${esc(t.title)}${assignee}`)
-      })
-
-      Object.entries(grouped).forEach(([status, items]) => {
-        msg += `${labels[status] || status}\n${items.join('\n')}\n\n`
-      })
-
-      msg += `<i>Filter by member: /tasks @name</i>`
-
-      await reply(msg)
       return NextResponse.json({ ok: true })
     }
 

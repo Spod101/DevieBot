@@ -15,7 +15,8 @@ export function useMembers() {
     const { data, error } = await supabase
       .from('members')
       .select('*')
-      .order('created_at', { ascending: true })
+      .order('cohort', { ascending: false })   // cohort4 before cohort3
+      .order('name',   { ascending: true })
     if (error) {
       toast.error('Failed to load members')
     } else {
@@ -28,12 +29,19 @@ export function useMembers() {
     fetchMembers()
   }, [fetchMembers])
 
-  async function createMember(payload: { telegram_id: string; telegram_username?: string }) {
+  async function createMember(payload: {
+    name: string
+    telegram_username?: string
+    telegram_id?: string
+    cohort: string
+  }) {
     const { data, error } = await supabase
       .from('members')
       .insert({
-        telegram_id: payload.telegram_id,
-        telegram_username: payload.telegram_username ?? null,
+        name:              payload.name.trim(),
+        telegram_id:       payload.telegram_id?.trim()       || null,
+        telegram_username: payload.telegram_username?.trim() || null,
+        cohort:            payload.cohort,
       })
       .select()
       .single()
