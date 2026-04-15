@@ -208,6 +208,11 @@ SUPPORTED MESSAGE FORMATS:
 
 3. Bullet / numbered lists under a single @mention — each bullet is a separate task.
 
+SKIP THESE — return []:
+- Messages asking someone to add/post/update tasks in the chat (e.g. "add your tasks here", "post your updates", "ilagay mo na tasks mo", "add tasks rin")
+- Conversational messages with no concrete deliverable (e.g. "can you join the call?", "please respond here", "check mo ito", "kumusta?")
+- Messages where the @mention is tagging someone in a conversation, not assigning real project work
+
 EXTRACTION RULES:
 - "assignee": @username without @, lowercase, first word only if full name (e.g. "Dale Reyes" → "dale")
 - "title": concise action (max 70 chars). Strip label prefixes like "Action Plan:", "Note:", "FYI:", "Task:", "Update:"

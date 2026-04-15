@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { generateStandupMessage, sendTelegramMessage } from '@/lib/standup'
-import { parseBulkTasks, parseBulkUpdates, parseMessage, parseStatus, extractDueDate, DEADLINE_KEYWORDS, cleanTaskTitle } from '@/lib/nlp'
+import { parseBulkTasks, parseMessage, parseStatus, cleanTaskTitle } from '@/lib/nlp'
 import type { TaskStatus } from '@/types/database'
 
 /** Returns a due date 7 days from today (ISO YYYY-MM-DD) */
@@ -55,9 +55,6 @@ function taskAddedMsg(task: {
   return lines.join('\n')
 }
 
-// Keyword gate — only run NLU on messages that plausibly contain a status update.
-// Avoids calling the Claude API on every group message.
-const NLU_TRIGGER = /\b(working on|wip|in[\s-]?progress|started|picking up|reviewing|in[\s-]?review|blocked|stuck|waiting for|finished|completed|done|shipped|delivered|wrapped)\b/i
 
 const VALID_STATUSES: TaskStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done']
 const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent']
@@ -710,130 +707,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── Bulk task assignment (natural language with @mentions) ────────
-    const mentionCount = (text.match(/@\w/g) || []).length
-    if (!cmd.startsWith('/') && mentionCount >= 1) {
-      const parsed = await parseBulkTasks(text)
-      if (parsed.length === 0) {
-        // Couldn't extract tasks from this free-form message — stay silent
-        return NextResponse.json({ ok: true })
-      }
-
-      const inserts = parsed.map(t => ({
-        title: t.title,
-        status: 'todo' as TaskStatus,
-        priority: t.priority,
-        order_index: 0,
-        assigned_to: t.assignee === 'unassigned' ? null : t.assignee,
-        camp_id: null,
-        due_date: validDate(t.dueDate) ?? defaultDueDate(),
-        description: t.description ?? null,
-      }))
-
-      const { data: created, error } = await supabase.from('tasks').insert(inserts).select()
-
-      if (error || !created) {
-        await reply('❌ Failed to create tasks.')
-        return NextResponse.json({ ok: true })
-      }
-
-      // Group by assignee for the summary
-      const grouped: Record<string, string[]> = {}
-      created.forEach((t: any) => {
-        const key = t.assigned_to ?? 'unassigned'
-        if (!grouped[key]) grouped[key] = []
-        const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
-        const due = t.due_date ? ` · ${new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''
-        const hasLink = t.description && /https?:\/\//.test(t.description) ? ' 🔗' : ''
-        grouped[key].push(`• <code>${code}</code> ${esc(t.title)}${due}${hasLink}`)
-      })
-
-      let msg = `✅ <b>${created.length} task${created.length > 1 ? 's' : ''} created!</b>\n\n`
-      Object.entries(grouped).forEach(([assignee, items]) => {
-        msg += `@${esc(assignee)}\n${items.join('\n')}\n\n`
-      })
-      await reply(msg.trim())
-      return NextResponse.json({ ok: true })
-    }
-
-    // ── Bulk status updates (no slash, no @mention) ───────────────────────
-    // Fires when message contains update shorthand or multiple status references.
-    // e.g. "done: login, deploy" / "login → done, docs → in review" / "finished X and Y is in review"
-    const BULK_UPDATE_TRIGGER = /(?:→|done:|finished|completed|in\s+review:|blocked:|in\s+progress:).+(?:,|and\s+).+/i
-    if (!cmd.startsWith('/') && BULK_UPDATE_TRIGGER.test(text) && !text.match(/@\w/)) {
-      const bulkUpdates = await parseBulkUpdates(text)
-      if (bulkUpdates.length >= 2) {
-        const statusEmoji: Record<string, string> = {
-          backlog: '📦', todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
-        }
-        const results: string[] = []
-        for (const upd of bulkUpdates) {
-          const { tasks: found, ambiguous } = await findTaskByRef(upd.taskRef, supabase)
-          if (found.length === 0) {
-            results.push(`❌ <b>"${esc(upd.taskRef)}"</b> — task not found`)
-          } else if (ambiguous) {
-            results.push(`⚠️ <b>"${esc(upd.taskRef)}"</b> — multiple matches found, please be more specific`)
-          } else {
-            await supabase.from('tasks').update({ status: upd.status }).eq('id', found[0].id)
-            const emoji = statusEmoji[upd.status] ?? '📌'
-            results.push(`${emoji} ${esc(found[0].title)} → <b>${upd.status.replace(/_/g, ' ')}</b>`)
-          }
-        }
-        await reply(`📋 <b>${bulkUpdates.length} update${bulkUpdates.length > 1 ? 's' : ''} applied:</b>\n${results.join('\n')}`)
-        return NextResponse.json({ ok: true })
-      }
-    }
-
-    // ── NLU: plain-text status expressions (no slash, no @mention) ───────
-    // Only fires when the message contains recognisable status-related words,
-    // keeping Claude API calls out of ordinary group chatter.
-    if (!cmd.startsWith('/') && NLU_TRIGGER.test(text)) {
-      const { data: nluTasks } = await supabase
-        .from('tasks').select('id, title, status, task_number').neq('status', 'done').limit(30)
-      const intent = await parseMessage(text, {
-        camps: [],
-        recentTasks: nluTasks ?? [],
-      })
-
-      if (intent.intent === 'update') {
-        const mapped: TaskStatus | null = STATUS_ALIASES[intent.status]
-          ?? (VALID_STATUSES.includes(intent.status as TaskStatus) ? intent.status as TaskStatus : null)
-
-        if (mapped && intent.taskId) {
-          const task = await findTaskByPrefix(intent.taskId, supabase)
-          if (task) {
-            await supabase.from('tasks').update({ status: mapped }).eq('id', task.id)
-            const E: Record<string, string> = {
-              todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
-            }
-            await reply(`${E[mapped] ?? '📌'} Got it. <b>${esc(task.title)}</b> → <b>${mapped.replace(/_/g, ' ')}</b>`)
-            return NextResponse.json({ ok: true })
-          }
-        }
-
-        // Status was understood but no matching task found — nudge the user
-        if (mapped && !intent.taskId) {
-          await reply(
-            `🤔 Sounds like something is <b>${mapped.replace(/_/g, ' ')}</b>. Which task?\n` +
-            `Use <code>/tasks</code> to see active tasks, then:\n` +
-            `<code>/update &lt;id&gt; ${mapped.replace(/_/g, ' ')}</code>`
-          )
-          return NextResponse.json({ ok: true })
-        }
-      }
-
-      if (intent.intent === 'done' && intent.taskId) {
-        const task = await findTaskByPrefix(intent.taskId, supabase)
-        if (task) {
-          await supabase.from('tasks').update({ status: 'done' }).eq('id', task.id)
-          await reply(`✅ <b>${esc(task.title)}</b>\nMarked as done. Nice work! 🎉`)
-          return NextResponse.json({ ok: true })
-        }
-      }
-
-      // Unknown intent or no task found — stay silent, don't interrupt group chat
-      return NextResponse.json({ ok: true })
-    }
+    // Non-slash messages are ignored — use slash commands to interact with Devie.
 
     // ── Unknown slash command — silently ignore regular chat ──────────
     if (cmd.startsWith('/')) {
