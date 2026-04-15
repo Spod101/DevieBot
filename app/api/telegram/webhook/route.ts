@@ -111,16 +111,14 @@ const TASK_STATUS_LABEL: Record<string, string> = {
   in_review: 'In Review', blocked: 'Blocked',
 }
 const TASK_STATUS_ORDER = ['blocked', 'in_progress', 'in_review', 'todo', 'backlog']
-const COHORT_LABEL: Record<string, string> = { all: 'All', cohort4: 'Cohort 4', cohort3: 'Cohort 3' }
-
 type TaskPage = {
   name: string
-  cohort: string
+  role: string
   byStatus: Record<string, string[]>
 }
 
 async function fetchTaskPages(
-  cohortFilter: string,
+  roleFilter: string,
   assigneeFilter: string | null,
   supabase: ReturnType<typeof createServiceClient>,
 ): Promise<TaskPage[]> {
@@ -133,52 +131,54 @@ async function fetchTaskPages(
 
   const { data: memberRows } = await supabase
     .from('members')
-    .select('name, telegram_username, cohort')
+    .select('name, telegram_username, role')
 
-  // Build lookup: assigneeKey → { display, cohort }
-  const memberMap = new Map<string, { display: string; cohort: string }>()
+  // Build lookup: assigneeKey → { display, role }
+  const memberMap = new Map<string, { display: string; role: string }>()
   for (const m of (memberRows ?? [])) {
     const display = m.name ?? m.telegram_username ?? ''
-    const cohort  = m.cohort ?? 'cohort4'
-    if (m.name)              memberMap.set(assigneeKey(m.name),              { display, cohort })
-    if (m.telegram_username) memberMap.set(assigneeKey(m.telegram_username), { display, cohort })
+    const role    = m.role ?? ''
+    if (m.name)              memberMap.set(assigneeKey(m.name),              { display, role })
+    if (m.telegram_username) memberMap.set(assigneeKey(m.telegram_username), { display, role })
   }
 
   // Group tasks by member → status
   const memberBuckets = new Map<string, TaskPage>()
 
   for (const t of (tasks ?? [])) {
-    const key    = assigneeKey(t.assigned_to ?? '')
-    const info   = t.assigned_to ? memberMap.get(key) : null
-    const cohort = info?.cohort ?? 'cohort4'
-    const name   = info?.display ?? t.assigned_to ?? '(Unassigned)'
+    const key  = assigneeKey(t.assigned_to ?? '')
+    const info = t.assigned_to ? memberMap.get(key) : null
+    const role = info?.role ?? ''
+    const name = info?.display ?? t.assigned_to ?? '(Unassigned)'
 
     // Apply filters
-    if (cohortFilter !== 'all' && cohort !== cohortFilter) continue
+    if (roleFilter !== 'all' && role !== roleFilter) continue
     if (assigneeFilter && assigneeKey(name) !== assigneeFilter) continue
 
     const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
     const line = `  • <code>${code}</code> ${esc(t.title)}`
 
-    if (!memberBuckets.has(name)) memberBuckets.set(name, { name, cohort, byStatus: {} })
+    if (!memberBuckets.has(name)) memberBuckets.set(name, { name, role, byStatus: {} })
     const bucket = memberBuckets.get(name)!
     if (!bucket.byStatus[t.status]) bucket.byStatus[t.status] = []
     bucket.byStatus[t.status].push(line)
   }
 
-  // Sort: cohort4 first, then cohort3, then alphabetically within each cohort
+  // Sort: admin first, then alphabetically by role, then by name within each role
   return [...memberBuckets.values()].sort((a, b) => {
-    if (a.cohort !== b.cohort) return a.cohort < b.cohort ? -1 : 1   // cohort4 < cohort3 alphabetically
+    if (a.role === 'admin' && b.role !== 'admin') return -1
+    if (b.role === 'admin' && a.role !== 'admin') return 1
+    if (a.role !== b.role) return a.role.localeCompare(b.role)
     return a.name.localeCompare(b.name)
   })
 }
 
-function buildTasksPage(pages: TaskPage[], page: number, cohortFilter: string): { text: string; keyboard: object } {
+function buildTasksPage(pages: TaskPage[], page: number, roleFilter: string): { text: string; keyboard: object } {
   const total   = pages.length
   const current = pages[Math.max(0, Math.min(page, total - 1))]
 
-  const cohortDisplay = cohortFilter === 'all' ? '' : ` — ${COHORT_LABEL[cohortFilter]}`
-  let text = `📋 <b>Tasks${cohortDisplay}</b>\n`
+  const roleDisplay = roleFilter === 'all' ? '' : ` — ${roleFilter}`
+  let text = `📋 <b>Tasks${roleDisplay}</b>\n`
   text += `👤 <b>${esc(current.name)}</b>  <i>(${page + 1} / ${total})</i>\n`
   text += `─────────────────────\n`
 
@@ -192,9 +192,11 @@ function buildTasksPage(pages: TaskPage[], page: number, cohortFilter: string): 
   }
   if (!hasAny) text += '\n<i>No active tasks.</i>\n'
 
-  // Filter row
-  const filterRow = (['all', 'cohort4', 'cohort3'] as const).map(f => ({
-    text: f === cohortFilter ? `· ${COHORT_LABEL[f]}` : COHORT_LABEL[f],
+  // Filter row — dynamically built from roles present in pages
+  const uniqueRoles = ['all', ...new Set(pages.map(p => p.role).filter(Boolean))]
+  const label = (r: string) => r === 'all' ? 'All' : r
+  const filterRow = uniqueRoles.map(f => ({
+    text: f === roleFilter ? `· ${label(f)}` : label(f),
     callback_data: `tasks|${f}|0`,
   }))
 
@@ -204,9 +206,9 @@ function buildTasksPage(pages: TaskPage[], page: number, cohortFilter: string): 
     const prev = page > 0 ? page - 1 : total - 1
     const next = page < total - 1 ? page + 1 : 0
     keyboard.inline_keyboard.push([
-      { text: '◀ Prev', callback_data: `tasks|${cohortFilter}|${prev}` },
-      { text: `${page + 1} / ${total}`, callback_data: `tasks|${cohortFilter}|${page}` },
-      { text: 'Next ▶', callback_data: `tasks|${cohortFilter}|${next}` },
+      { text: '◀ Prev', callback_data: `tasks|${roleFilter}|${prev}` },
+      { text: `${page + 1} / ${total}`, callback_data: `tasks|${roleFilter}|${page}` },
+      { text: 'Next ▶', callback_data: `tasks|${roleFilter}|${next}` },
     ])
   }
 
@@ -388,7 +390,7 @@ async function syncMember(from: {
       telegram_id: telegramId,
       telegram_username: username,
       name,
-      cohort: 'cohort4',   // default for auto-registered members; update manually if needed
+      role: 'cohort4',   // default for auto-registered members; update manually if needed
     })
 
     if (error) {
@@ -426,16 +428,16 @@ export async function POST(request: Request) {
       const token        = await getToken(supabase)
 
       if (token && data.startsWith('tasks|') && chatId && msgId) {
-        const [, cohortFilter, pageStr] = data.split('|')
+        const [, roleFilter, pageStr] = data.split('|')
         const page = parseInt(pageStr, 10)
         if (!isNaN(page)) {
-          const pages = await fetchTaskPages(cohortFilter, null, supabase)
+          const pages = await fetchTaskPages(roleFilter, null, supabase)
           if (pages.length === 0) {
             await answerCbq(token, cbq.id)
             return NextResponse.json({ ok: true })
           }
           const safePage = Math.max(0, Math.min(page, pages.length - 1))
-          const { text, keyboard } = buildTasksPage(pages, safePage, cohortFilter)
+          const { text, keyboard } = buildTasksPage(pages, safePage, roleFilter)
           await editWithKeyboard(token, chatId, msgId, text, keyboard)
         }
       }
@@ -478,8 +480,7 @@ export async function POST(request: Request) {
         `🤖 <b>Devie — Available Commands</b>\n\n` +
         `📋 <b>View</b>\n` +
         `/tasks — browse tasks by member (paginated)\n` +
-        `/tasks cohort4 — filter by Cohort 4\n` +
-        `/tasks cohort3 — filter by Cohort 3\n` +
+        `/tasks &lt;role&gt; — filter by role (e.g. cohort4, admin)\n` +
         `/tasks @name — filter by member\n` +
         `/deadlines — show upcoming deadlines\n` +
         `/standup — send the standup report\n\n` +
@@ -559,11 +560,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    // ── /tasks [cohort3|cohort4|@name] ─────────────────────────────────
+    // ── /tasks [role|@name] ─────────────────────────────────────────────
     if (cmd === '/tasks') {
-      // Detect team filter: /tasks cohort4  or  /tasks cohort3
-      const teamFilter = ['cohort4', 'cohort3'].find(c => rest.toLowerCase().includes(c)) ?? null
-
       // Detect member filter: /tasks @name
       const mentionedUsers = [...rest.matchAll(/@(\w+)/g)].map(m => m[1].toLowerCase())
       const resolvedUser   = mentionedUsers.length
@@ -571,18 +569,23 @@ export async function POST(request: Request) {
         : null
       const assigneeFilter = resolvedUser ? assigneeKey(resolvedUser.label) : null
 
-      const cohortFilter = teamFilter ?? 'all'
-      const pages = await fetchTaskPages(cohortFilter, assigneeFilter, supabase)
+      // Detect role filter: /tasks cohort4 or /tasks admin (anything that isn't an @mention)
+      const restTrimmed = rest.trim().toLowerCase()
+      const roleFilter  = !assigneeFilter && restTrimmed && !restTrimmed.startsWith('@')
+        ? restTrimmed
+        : 'all'
+
+      const pages = await fetchTaskPages(roleFilter, assigneeFilter, supabase)
 
       if (pages.length === 0) {
-        const who = resolvedUser ? ` for ${resolvedUser.label}` : teamFilter ? ` in ${COHORT_LABEL[teamFilter]}` : ''
+        const who = resolvedUser ? ` for ${resolvedUser.label}` : roleFilter !== 'all' ? ` in ${roleFilter}` : ''
         await reply(`📋 No active tasks found${who}.`)
         return NextResponse.json({ ok: true })
       }
 
       const token   = await getToken(supabase)
       const chatId  = message.chat?.id as number
-      const { text, keyboard } = buildTasksPage(pages, 0, cohortFilter)
+      const { text, keyboard } = buildTasksPage(pages, 0, roleFilter)
 
       if (token && chatId) {
         await sendWithKeyboard(token, chatId, text, keyboard, messageId)

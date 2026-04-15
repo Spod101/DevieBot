@@ -15,8 +15,8 @@ export function useMembers() {
     const { data, error } = await supabase
       .from('members')
       .select('*')
-      .order('cohort', { ascending: false })   // cohort4 before cohort3
-      .order('name',   { ascending: true })
+      .order('role', { ascending: true })
+      .order('name', { ascending: true })
     if (error) {
       toast.error('Failed to load members')
     } else {
@@ -31,17 +31,17 @@ export function useMembers() {
 
   async function createMember(payload: {
     name: string
+    role: string
     telegram_username?: string
     telegram_id?: string
-    cohort: string
   }) {
     const { data, error } = await supabase
       .from('members')
       .insert({
         name:              payload.name.trim(),
+        role:              payload.role.trim(),
         telegram_id:       payload.telegram_id?.trim()       || null,
         telegram_username: payload.telegram_username?.trim() || null,
-        cohort:            payload.cohort,
       })
       .select()
       .single()
@@ -54,6 +54,18 @@ export function useMembers() {
     return data
   }
 
+  async function updateMember(id: string, payload: { role?: string }) {
+    const { error } = await supabase
+      .from('members')
+      .update(payload)
+      .eq('id', id)
+    if (error) {
+      toast.error('Failed to update member')
+      return
+    }
+    setMembers(prev => prev.map(m => String(m.id) === String(id) ? { ...m, ...payload } : m))
+  }
+
   async function deleteMember(id: string) {
     const { error } = await supabase.from('members').delete().eq('id', id)
     if (error) {
@@ -64,5 +76,5 @@ export function useMembers() {
     setMembers(prev => prev.filter(m => String(m.id) !== String(id)))
   }
 
-  return { members, loading, fetchMembers, createMember, deleteMember }
+  return { members, loading, fetchMembers, createMember, updateMember, deleteMember }
 }

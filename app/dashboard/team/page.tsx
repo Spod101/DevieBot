@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useMembers } from '@/hooks/use-members'
 import { memberColor, memberLabel, memberInitials } from '@/lib/member-utils'
 import { Loader2, Trash2, MessageCircle, Users, UserPlus, CalendarDays } from 'lucide-react'
@@ -13,16 +13,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
-const COHORT_OPTIONS = [
-  { value: 'cohort4', label: 'Cohort 4' },
-  { value: 'cohort3', label: 'Cohort 3' },
-]
-
-const EMPTY_FORM = { name: '', telegram_username: '', telegram_id: '', cohort: 'cohort4' }
+const EMPTY_FORM = { name: '', telegram_username: '', telegram_id: '', role: '' }
 
 export default function TeamPage() {
-  const { members, loading, createMember, deleteMember } = useMembers()
+  const { members, loading, createMember, updateMember, deleteMember } = useMembers()
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [updatingId, setUpdatingId] = useState<number | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm]             = useState(EMPTY_FORM)
@@ -33,11 +29,19 @@ export default function TeamPage() {
   const newThisWeek  = members.filter(m => m.created_at && new Date(m.created_at) >= startOfWeek)
   const newThisMonth = members.filter(m => m.created_at && new Date(m.created_at) >= startOfMonth)
 
-  // Group by cohort — cohort4 first, then cohort3
-  const grouped = COHORT_OPTIONS.reduce<Record<string, typeof members>>((acc, { value }) => {
-    acc[value] = members.filter(m => (m.cohort ?? 'cohort4') === value)
-    return acc
-  }, {})
+  // Derive unique roles from members, sorted alphabetically
+  const roles = useMemo(() => {
+    const set = new Set(members.map(m => m.role ?? 'unassigned'))
+    return [...set].sort()
+  }, [members])
+
+  // Group members by role
+  const grouped = useMemo(() =>
+    roles.reduce<Record<string, typeof members>>((acc, role) => {
+      acc[role] = members.filter(m => (m.role ?? 'unassigned') === role)
+      return acc
+    }, {}),
+  [members, roles])
 
   async function handleDelete(id: string) {
     setDeletingId(Number(id))
@@ -45,15 +49,22 @@ export default function TeamPage() {
     setDeletingId(null)
   }
 
+  async function handleRoleChange(id: string, role: string) {
+    if (!role.trim()) return
+    setUpdatingId(Number(id))
+    await updateMember(id, { role: role.trim() })
+    setUpdatingId(null)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.name.trim()) return
+    if (!form.name.trim() || !form.role.trim()) return
     setSubmitting(true)
     await createMember({
       name:              form.name.trim(),
+      role:              form.role.trim(),
       telegram_username: form.telegram_username.trim() || undefined,
       telegram_id:       form.telegram_id.trim()       || undefined,
-      cohort:            form.cohort,
     })
     setSubmitting(false)
     setDialogOpen(false)
@@ -75,7 +86,6 @@ export default function TeamPage() {
             Members auto-register when they message in Telegram, or add them manually here.
           </p>
         </div>
-
         <Button onClick={() => setDialogOpen(true)} className="shrink-0 mt-1">
           <UserPlus className="h-4 w-4" />
           Add Member
@@ -108,19 +118,23 @@ export default function TeamPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="m-cohort">
-                Cohort <span className="text-destructive">*</span>
+              <Label htmlFor="m-role">
+                Role <span className="text-destructive">*</span>
               </Label>
-              <select
-                id="m-cohort"
-                value={form.cohort}
-                onChange={e => setForm(f => ({ ...f, cohort: e.target.value }))}
-                className="flex h-9 w-full rounded-lg border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {COHORT_OPTIONS.map(o => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
+              {/* datalist gives autocomplete from existing roles while still allowing new ones */}
+              <Input
+                id="m-role"
+                list="role-suggestions"
+                placeholder="e.g. cohort4, admin, mentor"
+                value={form.role}
+                onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+                required
+              />
+              <datalist id="role-suggestions">
+                {roles.filter(r => r !== 'unassigned').map(r => (
+                  <option key={r} value={r} />
                 ))}
-              </select>
+              </datalist>
             </div>
 
             <div className="space-y-1.5">
@@ -129,9 +143,7 @@ export default function TeamPage() {
                 <span className="text-muted-foreground text-xs font-normal">(optional)</span>
               </Label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm select-none">
-                  @
-                </span>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm select-none">@</span>
                 <Input
                   id="m-username"
                   placeholder="username"
@@ -156,7 +168,7 @@ export default function TeamPage() {
             </div>
 
             <DialogFooter showCloseButton>
-              <Button type="submit" disabled={submitting || !form.name.trim()}>
+              <Button type="submit" disabled={submitting || !form.name.trim() || !form.role.trim()}>
                 {submitting
                   ? <Loader2 className="h-4 w-4 animate-spin" />
                   : <UserPlus className="h-4 w-4" />
@@ -164,7 +176,6 @@ export default function TeamPage() {
                 Add Member
               </Button>
             </DialogFooter>
-
           </form>
         </DialogContent>
       </Dialog>
@@ -198,7 +209,7 @@ export default function TeamPage() {
         </div>
       )}
 
-      {/* ── Member list grouped by cohort ──────────────────────── */}
+      {/* ── Member list grouped by role ─────────────────────────── */}
       {loading ? (
         <div className="flex items-center justify-center h-40">
           <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--primary)' }} />
@@ -220,13 +231,13 @@ export default function TeamPage() {
 
       ) : (
         <div className="space-y-6">
-          {COHORT_OPTIONS.map(({ value, label }) => {
-            const cohortMembers = grouped[value]
-            if (!cohortMembers.length) return null
+          {roles.map(role => {
+            const roleMembers = grouped[role] ?? []
+            if (!roleMembers.length) return null
             return (
-              <div key={value}>
+              <div key={role}>
 
-                {/* Cohort section header */}
+                {/* Role section header */}
                 <div className="flex items-center gap-3 mb-3">
                   <span
                     className="text-xs font-semibold uppercase tracking-widest px-2.5 py-1 rounded-full"
@@ -236,10 +247,10 @@ export default function TeamPage() {
                       fontFamily: 'var(--font-jetbrains-mono)',
                     }}
                   >
-                    {label}
+                    {role}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {cohortMembers.length} member{cohortMembers.length !== 1 ? 's' : ''}
+                    {roleMembers.length} member{roleMembers.length !== 1 ? 's' : ''}
                   </span>
                 </div>
 
@@ -248,11 +259,10 @@ export default function TeamPage() {
                   className="rounded-2xl overflow-hidden overflow-x-auto"
                   style={{ border: '1px solid var(--border)', background: 'var(--card)' }}
                 >
-                  {/* Header */}
                   <div
                     className="grid gap-4 px-5 py-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground"
                     style={{
-                      gridTemplateColumns: '2fr 1.2fr 1.2fr 1fr auto',
+                      gridTemplateColumns: '2fr 1.2fr 1.2fr 1fr 1.2fr auto',
                       borderBottom: '1px solid var(--border)',
                       background: 'var(--muted)',
                       fontFamily: 'var(--font-jetbrains-mono)',
@@ -262,20 +272,20 @@ export default function TeamPage() {
                     <span>Username</span>
                     <span>Telegram ID</span>
                     <span>Joined</span>
+                    <span>Role</span>
                     <span />
                   </div>
 
-                  {/* Rows */}
-                  {cohortMembers.map((member, i) => {
+                  {roleMembers.map((member, i) => {
                     const color  = memberColor(member)
                     const name   = memberLabel(member)
-                    const isLast = i === cohortMembers.length - 1
+                    const isLast = i === roleMembers.length - 1
                     return (
                       <div
                         key={member.id}
                         className="grid items-center gap-4 px-5 py-3 group transition-colors"
                         style={{
-                          gridTemplateColumns: '2fr 1.2fr 1.2fr 1fr auto',
+                          gridTemplateColumns: '2fr 1.2fr 1.2fr 1fr 1.2fr auto',
                           borderBottom: isLast ? 'none' : '1px solid var(--border)',
                         }}
                         onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent)' }}
@@ -324,6 +334,29 @@ export default function TeamPage() {
                           {member.created_at ? format(new Date(member.created_at), 'MMM d, yyyy') : '—'}
                         </span>
 
+                        {/* Role — inline editable */}
+                        <div className="flex items-center">
+                          {updatingId === member.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                          ) : (
+                            <input
+                              list="role-suggestions"
+                              defaultValue={member.role ?? ''}
+                              onBlur={e => {
+                                const val = e.target.value.trim()
+                                if (val && val !== (member.role ?? '')) {
+                                  handleRoleChange(String(member.id), val)
+                                }
+                              }}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                              }}
+                              className="text-xs w-full rounded-md border border-transparent bg-transparent px-2 py-1 focus:outline-none focus:border-input focus:bg-background transition-all"
+                              style={{ fontFamily: 'var(--font-jetbrains-mono)', color: 'var(--primary)' }}
+                            />
+                          )}
+                        </div>
+
                         {/* Delete */}
                         <button
                           onClick={() => handleDelete(String(member.id))}
@@ -347,7 +380,6 @@ export default function TeamPage() {
                     )
                   })}
                 </div>
-
               </div>
             )
           })}
