@@ -13,7 +13,7 @@ export interface Member {
   id: number               // serial integer
   telegram_id: string | null
   telegram_username: string | null
-  name: string | null      // first_name + last_name from Telegram (always available)
+  name: string | null      // first_name + last_name from Telegram, or manually entered
   cohort: string | null    // 'cohort3' | 'cohort4'
   created_at: string
 }

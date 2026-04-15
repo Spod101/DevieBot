@@ -145,7 +145,7 @@ async function fetchTaskPages(
   }
 
   // Group tasks by member → status
-  const memberBuckets = new Map<string, { display: string; cohort: string; byStatus: Record<string, string[]> }>()
+  const memberBuckets = new Map<string, TaskPage>()
 
   for (const t of (tasks ?? [])) {
     const key    = assigneeKey(t.assigned_to ?? '')
@@ -160,7 +160,7 @@ async function fetchTaskPages(
     const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
     const line = `  • <code>${code}</code> ${esc(t.title)}`
 
-    if (!memberBuckets.has(name)) memberBuckets.set(name, { display: name, cohort, byStatus: {} })
+    if (!memberBuckets.has(name)) memberBuckets.set(name, { name, cohort, byStatus: {} })
     const bucket = memberBuckets.get(name)!
     if (!bucket.byStatus[t.status]) bucket.byStatus[t.status] = []
     bucket.byStatus[t.status].push(line)
@@ -169,7 +169,7 @@ async function fetchTaskPages(
   // Sort: cohort4 first, then cohort3, then alphabetically within each cohort
   return [...memberBuckets.values()].sort((a, b) => {
     if (a.cohort !== b.cohort) return a.cohort < b.cohort ? -1 : 1   // cohort4 < cohort3 alphabetically
-    return a.display.localeCompare(b.display)
+    return a.name.localeCompare(b.name)
   })
 }
 
@@ -388,6 +388,7 @@ async function syncMember(from: {
       telegram_id: telegramId,
       telegram_username: username,
       name,
+      cohort: 'cohort4',   // default for auto-registered members; update manually if needed
     })
 
     if (error) {
