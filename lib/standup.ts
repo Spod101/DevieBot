@@ -115,20 +115,18 @@ export function buildStandupPage(
   if (filter === 'overview') {
     text = `${header}\n\n`
     text += `📊 <b>Overview</b>\n`
-    text += `📌 Active: <b>${data.activeCount}</b>   ✅ Done: <b>${data.doneCount}</b>\n`
-    text += `🚧 Blocked: <b>${data.blocked.length}</b>   ⏰ Overdue: <b>${data.overdue.length}</b>`
+    text += `🔄 In Progress: <b>${data.inProgress.length}</b>\n`
+    text += `👀 In Review: <b>${data.inReview.length}</b>\n`
+    text += `📝 To Do: <b>${data.todo.length}</b>\n`
+    text += `📦 Backlog: <b>${data.backlog.length}</b>\n`
+    text += `✅ Done: <b>${data.doneCount}</b>\n`
+    text += `🚧 Blocked: <b>${data.blocked.length}</b>`
 
-    if (data.overdue.length > 0) {
-      text += `\n\n⏰ <b>Overdue</b>\n`
-      data.overdue.slice(0, 5).forEach(t => { text += taskLine(t) + '\n' })
-      if (data.overdue.length > 5) text += `<i>...and ${data.overdue.length - 5} more</i>`
-    }
-
-    if (data.blocked.length > 0) {
-      text += `\n\n🚧 <b>Blocked</b>\n`
-      data.blocked.slice(0, 5).forEach(t => { text += taskLine(t) + '\n' })
-      if (data.blocked.length > 5) text += `<i>...and ${data.blocked.length - 5} more</i>`
-    }
+    // Attention line — only shown when there's something that needs it
+    const flags: string[] = []
+    if (data.overdue.length)  flags.push(`⏰ ${data.overdue.length} overdue`)
+    if (data.blocked.length)  flags.push(`🚧 ${data.blocked.length} blocked`)
+    if (flags.length) text += `\n\n<i>Heads up: ${flags.join(' · ')} — use the buttons below to review.</i>`
 
   } else if (filter === 'active') {
     const sections: [string, any[]][] = [
