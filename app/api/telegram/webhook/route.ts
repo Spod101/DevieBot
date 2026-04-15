@@ -147,11 +147,7 @@ async function fetchTaskPages(
   // Collect all distinct non-empty roles from the members table
   const allRoles = [...new Set(
     (memberRows ?? []).map(m => m.role ?? '').filter(Boolean)
-  )].sort((a, b) => {
-    if (a === 'admin') return -1
-    if (b === 'admin') return 1
-    return a.localeCompare(b)
-  })
+  )].sort((a, b) => a.localeCompare(b))
 
   // Build lookup: assigneeKey → { display, role }
   const memberMap = new Map<string, { display: string; role: string }>()
@@ -184,10 +180,8 @@ async function fetchTaskPages(
     bucket.byStatus[t.status].push(line)
   }
 
-  // Sort: admin first, then alphabetically by role, then by name within each role
+  // Sort alphabetically by role, then by name within each role
   const pages = [...memberBuckets.values()].sort((a, b) => {
-    if (a.role === 'admin' && b.role !== 'admin') return -1
-    if (b.role === 'admin' && a.role !== 'admin') return 1
     if (a.role !== b.role) return a.role.localeCompare(b.role)
     return a.name.localeCompare(b.name)
   })
@@ -325,6 +319,19 @@ async function resolveName(username: string, supabase: ReturnType<typeof createS
     .ilike('telegram_username', username)
     .maybeSingle()
   return data?.name ?? data?.telegram_username ?? username
+}
+
+// Returns all members whose role matches the given string (case-insensitive).
+// Returns an empty array if no role match is found.
+async function resolveRoleMembers(
+  roleSlug: string,
+  supabase: ReturnType<typeof createServiceClient>,
+): Promise<{ name: string; telegram_username: string | null }[]> {
+  const { data } = await supabase
+    .from('members')
+    .select('name, telegram_username')
+    .ilike('role', roleSlug)
+  return data ?? []
 }
 
 function assigneeKey(value: string | null | undefined): string {
@@ -539,7 +546,7 @@ export async function POST(request: Request) {
         `🤖 <b>Devie — Available Commands</b>\n\n` +
         `📋 <b>View</b>\n` +
         `/tasks — browse tasks by member (paginated)\n` +
-        `/tasks &lt;role&gt; — filter by role (e.g. cohort4, admin)\n` +
+        `/tasks &lt;role&gt; — filter by role (e.g. cohort4, cohort3)\n` +
         `/tasks @name — filter by member\n` +
         `/deadlines — show upcoming deadlines\n` +
         `/standup — send the standup report\n\n` +
@@ -635,7 +642,7 @@ export async function POST(request: Request) {
         : null
       const assigneeFilter = resolvedUser ? assigneeKey(resolvedUser.label) : null
 
-      // Detect role filter: /tasks cohort4 or /tasks admin (anything that isn't an @mention)
+      // Detect role filter: /tasks cohort4 or /tasks cohort3 (anything that isn't an @mention)
       const restTrimmed = rest.trim().toLowerCase()
       const roleFilter  = !assigneeFilter && restTrimmed && !restTrimmed.startsWith('@')
         ? restTrimmed
@@ -839,8 +846,6 @@ export async function POST(request: Request) {
         const hasSingleMention = mentionsInRest.length === 1 && !rawRest.includes('--') && !rawRest.includes(',')
         if (hasSingleMention) {
           const username = mentionsInRest[0][1].toLowerCase()
-          const assignedName = await resolveName(username, supabase)
-          // Strip the @mention then let NLP clean the rest
           const withoutMention = rawRest.replace(/@\w+/g, '').replace(/\s+/g, ' ').trim()
           const cleaned = await cleanTaskTitle(withoutMention)
           if (!cleaned.title) {
@@ -848,6 +853,67 @@ export async function POST(request: Request) {
             return NextResponse.json({ ok: true })
           }
           const due = cleaned.dueDate ?? defaultDueDate()
+
+          // ── @all: assign to every member ─────────────────────────────
+          if (username === 'all') {
+            const { data: allMembers } = await supabase
+              .from('members')
+              .select('name, telegram_username')
+            const members = allMembers ?? []
+            if (members.length === 0) {
+              await reply('❌ No members found to assign to.')
+              return NextResponse.json({ ok: true })
+            }
+            const inserts = members.map(m => ({
+              title: cleaned.title, status: 'todo' as TaskStatus,
+              priority: cleaned.priority, order_index: 0,
+              assigned_to: m.name ?? m.telegram_username ?? null,
+              due_date: due,
+            }))
+            const { data: created, error } = await supabase.from('tasks').insert(inserts).select()
+            if (error || !created) {
+              await reply('❌ Something went wrong while creating the tasks. Please try again.')
+            } else {
+              const memberList = members.map(m => `• ${esc(m.name ?? m.telegram_username ?? '—')}`).join('\n')
+              await reply(
+                `✅ Task assigned to all <b>${created.length}</b> member${created.length !== 1 ? 's' : ''}\n\n` +
+                `📝 <b>${esc(cleaned.title)}</b>\n${memberList}\n\n` +
+                `<i>Refresh the dashboard to see the changes.</i>`
+              )
+            }
+            return NextResponse.json({ ok: true })
+          }
+
+          // ── Role assignment: @cohort3, @cohort4, etc. ────────────────
+          const roleMembers = await resolveRoleMembers(username, supabase)
+          if (roleMembers.length > 0) {
+            const inserts = roleMembers.map(m => ({
+              title: cleaned.title, status: 'todo' as TaskStatus,
+              priority: cleaned.priority, order_index: 0,
+              assigned_to: m.name ?? m.telegram_username ?? null,
+              due_date: due,
+            }))
+            const { data: created, error } = await supabase.from('tasks').insert(inserts).select()
+            if (error || !created) {
+              await reply('❌ Something went wrong while creating the tasks. Please try again.')
+            } else {
+              const memberList = roleMembers
+                .map(m => `• ${esc(m.name ?? m.telegram_username ?? '—')}`)
+                .join('\n')
+              const code = created[0]?.task_number
+                ? `T-${String(created[0].task_number).padStart(3, '0')}…`
+                : ''
+              await reply(
+                `✅ Task assigned to <b>${created.length}</b> member${created.length !== 1 ? 's' : ''} in <b>${esc(username)}</b>${code ? ` · <code>${code}</code>` : ''}\n\n` +
+                `📝 <b>${esc(cleaned.title)}</b>\n${memberList}\n\n` +
+                `<i>Refresh the dashboard to see the changes.</i>`
+              )
+            }
+            return NextResponse.json({ ok: true })
+          }
+
+          // ── Single member assignment ───────────────────────────────────
+          const assignedName = await resolveName(username, supabase)
           const { data: task, error } = await supabase
             .from('tasks')
             .insert({ title: cleaned.title, status: 'todo', priority: cleaned.priority, order_index: 0, assigned_to: assignedName, due_date: due })
