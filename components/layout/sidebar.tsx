@@ -159,7 +159,7 @@ export function Sidebar() {
       <aside
         className={cn(
           'flex flex-col w-[86vw] max-w-[18rem] md:w-64 shrink-0',
-          'fixed md:sticky top-14 md:top-0 h-[calc(100dvh-3.5rem)] md:h-screen z-50 md:z-auto',
+          'fixed top-14 md:top-0 h-[calc(100dvh-3.5rem)] md:h-screen z-50 md:z-30',
           'transition-transform duration-300 ease-in-out',
           mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
         )}

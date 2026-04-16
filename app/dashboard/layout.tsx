@@ -89,7 +89,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* ── Dashboard shell ───────────────────────────────────────── */}
         <div className="relative flex min-h-screen">
           <Sidebar />
-          <main className="flex-1 overflow-auto styled-scroll pt-14 md:pt-0">
+          <main className="flex-1 overflow-auto styled-scroll pt-14 md:pt-0 md:pl-64">
             {children}
           </main>
         </div>
