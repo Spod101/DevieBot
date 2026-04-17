@@ -262,6 +262,64 @@ const STATUS_ALIASES: Record<string, TaskStatus> = {
   finished: 'done',
 }
 
+const STATUS_TAIL_PATTERN = '(?:backlog|todo|in[\\s_-]*progress|progress|in[\\s_-]+review|review|blocked|done|complete|finished)'
+
+function normalizeStatusInput(value: string): string {
+  return value.toLowerCase()
+    .replace(/mark\s+(as\s+)?/i, '')
+    .trim()
+    .replace(/[\s-]+/g, '_')
+}
+
+function splitRefAndStatus(segment: string): { ref: string; statusRaw: string } | null {
+  const part = segment.trim()
+  if (!part) return null
+
+  const tail = part.match(new RegExp(`^(.*?)\\s+(${STATUS_TAIL_PATTERN})$`, 'i'))
+  if (tail) {
+    const ref = tail[1].trim()
+    const statusRaw = tail[2].trim()
+    if (!ref || !statusRaw) return null
+    return { ref, statusRaw }
+  }
+
+  const tokens = part.split(/\s+/)
+  if (tokens.length < 2) return null
+  return {
+    ref: tokens[0],
+    statusRaw: tokens.slice(1).join(' '),
+  }
+}
+
+function parseUpdateSpecs(raw: string): Array<{ ref: string; statusRaw: string }> {
+  const input = raw.trim()
+  if (!input) return []
+
+  // Shared trailing status: "t21,t22,t23 done"
+  const shared = input.match(new RegExp(`^(.+?)\\s+(${STATUS_TAIL_PATTERN})$`, 'i'))
+  if (shared) {
+    const refsPart = shared[1]
+    const statusRaw = shared[2].trim()
+    if (refsPart.includes(',') || refsPart.includes('\n')) {
+      const refs = refsPart
+        .split(/[\n,]+/)
+        .map(r => r.trim())
+        .filter(Boolean)
+      if (refs.length > 0) {
+        return refs.map(ref => ({ ref, statusRaw }))
+      }
+    }
+  }
+
+  const parts = (input.includes('\n') || input.includes(','))
+    ? input.split(/[\n,]+/).map(s => s.trim()).filter(Boolean)
+    : [input]
+
+  return parts
+    .map(splitRefAndStatus)
+    .filter((spec): spec is { ref: string; statusRaw: string } => spec !== null)
+}
+
 // Accept "T-001", "t001", "1" (task_number) or a UUID prefix
 async function findTaskByPrefix(input: string, supabase: ReturnType<typeof createServiceClient>) {
   const clean = input.trim()
@@ -556,7 +614,10 @@ export async function POST(request: Request) {
         `/addtask &lt;title&gt; @username — add a task and assign it to someone\n\n` +
         `✏️ <b>Update</b>\n` +
         `/done &lt;number or keyword&gt; — e.g. /done 23 or /done login bug\n` +
-        `/update &lt;number or keyword&gt; &lt;status&gt; — e.g. /update login in review\n` +
+        `/update &lt;number or keyword&gt; &lt;status&gt; — single update\n` +
+        `/update t21,t22,t23 done — bulk shared status\n` +
+        `/update t21 done, t22 review, t23 inprogress — bulk mixed status\n` +
+        `/update t31 done\nt30 done\nt32 done — bulk multiline\n` +
         `<i>Statuses: backlog · todo · in progress · in review · blocked · done</i>`
       )
       return NextResponse.json({ ok: true })
@@ -689,7 +750,9 @@ export async function POST(request: Request) {
             `<b>Examples:</b>\n` +
             `/update 23 in review\n` +
             `/update login in review\n` +
-            `/update docs blocked\n\n` +
+            `/update t21,t22,t23 done\n` +
+            `/update t21 done, t22 review, t23 inprogress\n` +
+            `/update t31 done\nt30 done\nt32 done\n\n` +
             `<i>Statuses: backlog · todo · in progress · in review · blocked · done</i>`
           ),
         }
@@ -730,55 +793,86 @@ export async function POST(request: Request) {
 
       // ── /update fast path ─────────────────────────────────────────────
       if (cmd === '/update') {
-        // ref = first arg (number or single keyword); status = everything after
-        const ref = args[0]
-        const statusRaw = args.slice(1).join(' ').toLowerCase()
-          .replace(/mark\s+(as\s+)?/i, '').trim()
-          .replace(/[\s-]+/g, '_')
+        const specs = parseUpdateSpecs(rawRest)
 
-        if (!ref || !statusRaw) {
+        if (specs.length === 0) {
           await reply(
             `Usage: <code>/update &lt;number or keyword&gt; &lt;status&gt;</code>\n\n` +
-            `<b>Examples:</b>\n/update 23 in review\n/update login blocked\n\n` +
+            `<b>Examples:</b>\n` +
+            `/update 23 in review\n` +
+            `/update login blocked\n` +
+            `/update t21,t22,t23 done\n` +
+            `/update t21 done, t22 review, t23 inprogress\n` +
+            `/update t31 done\nt30 done\nt32 done\n\n` +
             `<i>Valid statuses: backlog · todo · in progress · in review · blocked · done</i>`
           )
           return NextResponse.json({ ok: true })
         }
 
-        let mappedStatus: TaskStatus | null = STATUS_ALIASES[statusRaw.replace(/_/g, '-')]
-          ?? STATUS_ALIASES[statusRaw]
-          ?? (VALID_STATUSES.includes(statusRaw as TaskStatus) ? statusRaw as TaskStatus : null)
-
-        // Fall back to Claude when alias lookup fails — handles any natural language
-        // e.g. "working on it", "up for review", "literally blocked rn"
-        if (!mappedStatus) {
-          mappedStatus = await parseStatus(statusRaw)
-        }
-
-        if (!mappedStatus) {
-          await reply(`❌ <b>${esc(statusRaw)}</b> is not a recognized status.\nValid options: backlog · todo · in progress · in review · blocked · done`)
-          return NextResponse.json({ ok: true })
-        }
-
-        const { tasks: updTasks, ambiguous: updAmbiguous } = await findTaskByRef(ref, supabase)
-        if (updTasks.length === 0) {
-          await reply(`❌ No active task found matching <b>"${esc(ref)}"</b>.\n\n<i>Use /tasks to see all active tasks.</i>`)
-          return NextResponse.json({ ok: true })
-        }
-        if (updAmbiguous) {
-          const list = updTasks.map(taskRefLine).join('\n')
-          await reply(
-            `🔍 Multiple tasks matched <b>"${esc(ref)}"</b>:\n${list}\n\n` +
-            `Please be more specific, or use the task number:\n<code>/update &lt;number&gt; ${statusRaw.replace(/_/g, ' ')}</code>`
-          )
-          return NextResponse.json({ ok: true })
-        }
-        const updTask = updTasks[0]
-        await supabase.from('tasks').update({ status: mappedStatus }).eq('id', updTask.id)
         const statusEmoji: Record<string, string> = {
           backlog: '📦', todo: '📝', in_progress: '🔄', in_review: '👀', blocked: '🚧', done: '✅',
         }
-        await reply(`${statusEmoji[mappedStatus] ?? '📌'} <b>${esc(updTask.title)}</b>\nUpdated to: <b>${mappedStatus.replace(/_/g, ' ')}</b>`)
+        const updatedLines: string[] = []
+        const failedLines: string[] = []
+
+        for (const spec of specs) {
+          const normalizedStatus = normalizeStatusInput(spec.statusRaw)
+
+          if (normalizedStatus === 'inreview') {
+            failedLines.push(`• <b>${esc(spec.ref)}</b> → invalid status <b>${esc(spec.statusRaw)}</b> (use <b>review</b>)`)
+            continue
+          }
+
+          let mappedStatus: TaskStatus | null = STATUS_ALIASES[normalizedStatus.replace(/_/g, '-')]
+            ?? STATUS_ALIASES[normalizedStatus]
+            ?? (VALID_STATUSES.includes(normalizedStatus as TaskStatus) ? normalizedStatus as TaskStatus : null)
+
+          // Fall back to Claude when alias lookup fails — handles any natural language
+          // e.g. "working on it", "up for review", "literally blocked rn"
+          if (!mappedStatus) {
+            mappedStatus = await parseStatus(normalizedStatus)
+          }
+
+          if (!mappedStatus) {
+            failedLines.push(`• <b>${esc(spec.ref)}</b> → invalid status <b>${esc(spec.statusRaw)}</b>`)
+            continue
+          }
+
+          const { tasks: updTasks, ambiguous: updAmbiguous } = await findTaskByRef(spec.ref, supabase)
+          if (updTasks.length === 0) {
+            failedLines.push(`• <b>${esc(spec.ref)}</b> → no active task found`)
+            continue
+          }
+          if (updAmbiguous) {
+            failedLines.push(`• <b>${esc(spec.ref)}</b> → multiple tasks matched; use task number`)
+            continue
+          }
+
+          const updTask = updTasks[0]
+          await supabase.from('tasks').update({ status: mappedStatus }).eq('id', updTask.id)
+          const code = updTask.task_number ? `T-${String(updTask.task_number).padStart(3, '0')}` : updTask.id.slice(0, 6)
+          updatedLines.push(
+            `• ${statusEmoji[mappedStatus] ?? '📌'} <code>${code}</code> ${esc(updTask.title)} → <b>${mappedStatus.replace(/_/g, ' ')}</b>`
+          )
+        }
+
+        if (updatedLines.length === 0) {
+          let msg = `❌ No tasks were updated.\n\n`
+          if (failedLines.length > 0) msg += failedLines.join('\n') + '\n\n'
+          msg += `<i>Use /tasks to see valid task numbers.</i>`
+          await reply(msg)
+          return NextResponse.json({ ok: true })
+        }
+
+        let msg = `✅ <b>Updated ${updatedLines.length} task${updatedLines.length !== 1 ? 's' : ''}.</b>\n`
+        msg += updatedLines.join('\n')
+
+        if (failedLines.length > 0) {
+          msg += `\n\n⚠️ <b>Skipped ${failedLines.length} item${failedLines.length !== 1 ? 's' : ''}:</b>\n`
+          msg += failedLines.join('\n')
+        }
+
+        await reply(msg)
         return NextResponse.json({ ok: true })
       }
 
