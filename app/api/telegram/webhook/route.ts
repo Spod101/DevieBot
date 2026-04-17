@@ -496,7 +496,7 @@ export async function POST(request: Request) {
         const page   = parseInt(pageStr ?? '0', 10)
         if (VALID_STANDUP_FILTERS.has(filter) && !isNaN(page)) {
           const standupData = await fetchStandupData()
-          const { text, keyboard } = buildStandupPage(standupData, filter, page)
+          const { text, keyboard } = await buildStandupPage(standupData, filter, page)
           const edited = await editWithKeyboard(token, chatId, msgId, text, keyboard)
           if (!edited) {
             await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -622,7 +622,7 @@ export async function POST(request: Request) {
     // ── /standup ──────────────────────────────────────────────────────
     if (cmd === '/standup') {
       const standupData = await fetchStandupData()
-      const { text, keyboard } = buildStandupPage(standupData, 'overview', 0)
+      const { text, keyboard } = await buildStandupPage(standupData, 'overview', 0)
       const token  = await getToken(supabase)
       const chatId = message.chat?.id as number
       if (token && chatId) {

@@ -22,7 +22,7 @@ export async function POST() {
 export async function GET() {
   try {
     const data = await fetchStandupData()
-    const { text } = buildStandupPage(data, 'overview', 0)
+    const { text } = await buildStandupPage(data, 'overview', 0)
     return NextResponse.json({ ok: true, message: text })
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err.message }, { status: 500 })

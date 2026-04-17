@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk'
 import { createServiceClient } from '@/lib/supabase/service'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -23,6 +24,28 @@ const PRIORITY_BADGE: Record<string, string> = {
   urgent: ' 🔴', high: ' 🟠', medium: '', low: '',
 }
 
+// ── Quote (Haiku-generated) ───────────────────────────────────────────────────
+
+async function dailyQuote(): Promise<string> {
+  try {
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 120,
+      messages: [{
+        role: 'user',
+        content: 'Give me one short motivational or inspirational quote suitable for a tech team\'s daily standup. Reply with only the quote and the author in this exact format — no extra text:\n"<quote>" — <Author>',
+      }],
+    })
+    const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : ''
+    const match = raw.match(/^"(.+?)"\s*[—–-]+\s*(.+)$/)
+    if (match) return `<i>"${esc(match[1])}"</i>\n— <i>${esc(match[2])}</i>`
+    return `<i>${esc(raw)}</i>`
+  } catch {
+    return ''
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function esc(s: string): string {
@@ -35,7 +58,7 @@ function taskLine(t: any): string {
   const badge    = PRIORITY_BADGE[t.priority] ?? ''
   const assignee = t.assigned_to ? ` — ${esc(t.assigned_to)}` : ''
   const due      = t.due_date
-    ? ` · ${new Date(t.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    ? ` · ${new Date(t.due_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
     : ''
   return `▸ ${code}${title}${badge}${assignee}${due}`
 }
@@ -100,11 +123,11 @@ export async function fetchStandupData(): Promise<StandupData> {
 
 // ── Page builder ─────────────────────────────────────────────────────────────
 
-export function buildStandupPage(
+export async function buildStandupPage(
   data: StandupData,
   filter: StandupFilter,
   _page: number,   // unused — no member pagination for DSU
-): { text: string; keyboard: object } {
+): Promise<{ text: string; keyboard: object }> {
   const header =
     `${greeting()}\n\n` +
     `📋 <b>DEVCON COHORT 4 — Daily Stand Up</b>\n` +
@@ -127,6 +150,11 @@ export function buildStandupPage(
     if (data.overdue.length)  flags.push(`⏰ ${data.overdue.length} overdue`)
     if (data.blocked.length)  flags.push(`🚧 ${data.blocked.length} blocked`)
     if (flags.length) text += `\n\n<i>Heads up: ${flags.join(' · ')} — use the buttons below to review.</i>`
+
+    text += `\n\n📚 <b>Reminder:</b> <i>Read and finish your assigned books, cohorts! Consistency compounds.</i>`
+
+    const quote = await dailyQuote()
+    if (quote) text += `\n\n${quote}`
 
   } else if (filter === 'active') {
     const sections: [string, any[]][] = [
@@ -230,12 +258,12 @@ export async function sendTelegramMessage(
 /** Send the standup overview card with section filter buttons. */
 export async function sendStandupReport(options: { replyToMessageId?: number } = {}) {
   const data = await fetchStandupData()
-  const { text, keyboard } = buildStandupPage(data, 'overview', 0)
+  const { text, keyboard } = await buildStandupPage(data, 'overview', 0)
   return sendTelegramMessage(text, { ...options, keyboard })
 }
 
 /** Kept for any legacy callers. */
 export async function generateStandupMessage(): Promise<string> {
   const data = await fetchStandupData()
-  return buildStandupPage(data, 'overview', 0).text
+  return (await buildStandupPage(data, 'overview', 0)).text
 }
