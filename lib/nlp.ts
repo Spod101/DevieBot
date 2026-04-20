@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { TaskStatus } from '@/types/database'
-import { addDaysToISODate, getTodayInAppTimeZoneISO, getWeekdayFromISODate } from '@/lib/date'
+import { addDaysToISODate, getTodayInAppTimeZoneISO, getWeekdayFromISODate } from './date'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 

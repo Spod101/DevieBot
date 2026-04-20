@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import {
-  fetchStandupData, buildStandupPage, sendStandupReport, sendTelegramMessage,
+  fetchStandupData, buildStandupPage, sendTelegramMessage,
   VALID_STANDUP_FILTERS, type StandupFilter,
 } from '@/lib/standup'
 import { parseBulkTasks, parseMessage, parseStatus, cleanTaskTitle } from '@/lib/nlp'
