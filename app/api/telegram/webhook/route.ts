@@ -129,6 +129,11 @@ type TaskPage = {
   byStatus: Record<string, string[]>
 }
 
+type TaskCommentMeta = {
+  link?: string
+  note?: string
+}
+
 async function fetchTaskPages(
   roleFilter: string,
   assigneeFilter: string | null,
@@ -143,13 +148,22 @@ async function fetchTaskPages(
 
   const taskIds = (tasks ?? []).map((t: any) => t.id)
   const { data: commentRows } = taskIds.length
-    ? await supabase.from('task_comments').select('task_id, content').in('task_id', taskIds).ilike('content', 'http%').order('created_at', { ascending: false })
+    ? await supabase.from('task_comments').select('task_id, content').in('task_id', taskIds).order('created_at', { ascending: false })
     : { data: [] as { task_id: string; content: string }[] }
 
-  // Latest URL comment per task
-  const taskLinkMap = new Map<string, string>()
+  // Latest link and latest note per task
+  const taskCommentMetaMap = new Map<string, TaskCommentMeta>()
   for (const c of (commentRows ?? [])) {
-    if (!taskLinkMap.has(c.task_id)) taskLinkMap.set(c.task_id, c.content)
+    const content = (c.content ?? '').trim()
+    if (!content) continue
+
+    const current = taskCommentMetaMap.get(c.task_id) ?? {}
+    if (!current.link && /^https?:\/\//i.test(content)) {
+      current.link = content
+    } else if (!current.note) {
+      current.note = content
+    }
+    taskCommentMetaMap.set(c.task_id, current)
   }
 
   const { data: memberRows } = await supabase
@@ -159,7 +173,9 @@ async function fetchTaskPages(
   // Collect all distinct non-empty roles from the members table
   const allRoles = [...new Set(
     (memberRows ?? []).map(m => m.role ?? '').filter(Boolean)
-  )].sort((a, b) => a.localeCompare(b))
+  )]
+    .filter(r => r.toLowerCase() !== 'admin')
+    .sort((a, b) => a.localeCompare(b))
 
   // Build lookup: assigneeKey → { display, role }
   const memberMap = new Map<string, { display: string; role: string }>()
@@ -184,9 +200,12 @@ async function fetchTaskPages(
     if (assigneeFilter && assigneeKey(name) !== assigneeFilter) continue
 
     const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
-    const link = taskLinkMap.get(t.id)
+    const commentMeta = taskCommentMetaMap.get(t.id)
+    const link = commentMeta?.link
+    const note = commentMeta?.note
     const linkPart = link ? ` · <a href="${link}">🔗</a>` : ''
-    const line = `  • <code>${code}</code> ${esc(t.title)}${linkPart}`
+    const notePart = note ? `\n    📝 ${esc(note)}` : ''
+    const line = `  • <code>${code}</code> ${esc(t.title)}${linkPart}${notePart}`
 
     if (!memberBuckets.has(name)) memberBuckets.set(name, { name, role, byStatus: {} })
     const bucket = memberBuckets.get(name)!
@@ -291,8 +310,29 @@ function extractLink(input: string): { text: string; link?: string } {
   return { text: input }
 }
 
-function splitRefAndStatus(segment: string): { ref: string; statusRaw: string; link?: string } | null {
-  const { text: part, link } = extractLink(segment.trim())
+function extractMeta(input: string): { text: string; link?: string; note?: string } {
+  let text = input.trim()
+
+  const linkMatch = text.match(/\s+link:(https?:\/\/\S+)/i)
+  const link = linkMatch?.[1]
+  if (linkMatch) {
+    text = text.replace(linkMatch[0], '').trim()
+  }
+
+  const noteMatch = text.match(/\s+note:\s*(.+)$/i)
+  if (noteMatch) {
+    const note = noteMatch[1].trim()
+    return {
+      text: text.slice(0, noteMatch.index).trim(),
+      link,
+      note: note || undefined,
+    }
+  }
+  return { text, link }
+}
+
+function splitRefAndStatus(segment: string): { ref: string; statusRaw: string; link?: string; note?: string } | null {
+  const { text: part, link, note } = extractMeta(segment.trim())
   if (!part) return null
 
   const tail = part.match(new RegExp(`^(.*?)\\s+(${STATUS_TAIL_PATTERN})$`, 'i'))
@@ -300,7 +340,7 @@ function splitRefAndStatus(segment: string): { ref: string; statusRaw: string; l
     const ref = tail[1].trim()
     const statusRaw = tail[2].trim()
     if (!ref || !statusRaw) return null
-    return { ref, statusRaw, link }
+    return { ref, statusRaw, link, note }
   }
 
   const tokens = part.split(/\s+/)
@@ -309,10 +349,11 @@ function splitRefAndStatus(segment: string): { ref: string; statusRaw: string; l
     ref: tokens[0],
     statusRaw: tokens.slice(1).join(' '),
     link,
+    note,
   }
 }
 
-function parseUpdateSpecs(raw: string): Array<{ ref: string; statusRaw: string; link?: string }> {
+function parseUpdateSpecs(raw: string): Array<{ ref: string; statusRaw: string; link?: string; note?: string }> {
   const input = raw.trim()
   if (!input) return []
 
@@ -338,7 +379,7 @@ function parseUpdateSpecs(raw: string): Array<{ ref: string; statusRaw: string; 
 
   return parts
     .map(splitRefAndStatus)
-    .filter((spec): spec is { ref: string; statusRaw: string; link?: string } => spec !== null)
+    .filter((spec): spec is { ref: string; statusRaw: string; link?: string; note?: string } => spec !== null)
 }
 
 // Accept "T-001", "t001", "1" (task_number) or a UUID prefix
@@ -825,9 +866,9 @@ export async function POST(request: Request) {
             `/update t21,t22,t23 done\n` +
             `/update t21 done, t22 review, t23 inprogress\n` +
             `/update t31 done\nt30 done\nt32 done\n` +
-            `/update T-001 done link:https://github.com/...\n\n` +
+            `/update T-001 done link:https://github.com/... note: ready for QA\n\n` +
             `<i>Valid statuses: backlog · todo · in progress · in review · blocked · done</i>\n` +
-            `<i>Optionally append <code>link:&lt;url&gt;</code> to attach a link as a comment.</i>`
+            `<i>Optionally append <code>link:&lt;url&gt;</code> and/or <code>note:&lt;text&gt;</code>.</i>`
           )
           return NextResponse.json({ ok: true })
         }
@@ -873,13 +914,17 @@ export async function POST(request: Request) {
 
           const updTask = updTasks[0]
           await supabase.from('tasks').update({ status: mappedStatus }).eq('id', updTask.id)
-          if (spec.link) {
-            await supabase.from('task_comments').insert({ task_id: updTask.id, content: spec.link })
+          const commentsToInsert: { task_id: string; content: string }[] = []
+          if (spec.link) commentsToInsert.push({ task_id: updTask.id, content: spec.link })
+          if (spec.note) commentsToInsert.push({ task_id: updTask.id, content: spec.note })
+          if (commentsToInsert.length > 0) {
+            await supabase.from('task_comments').insert(commentsToInsert)
           }
           const code = updTask.task_number ? `T-${String(updTask.task_number).padStart(3, '0')}` : updTask.id.slice(0, 6)
           const linkSuffix = spec.link ? `\n  🔗 ${spec.link}` : ''
+          const noteSuffix = spec.note ? `\n  📝 ${esc(spec.note)}` : ''
           updatedLines.push(
-            `• ${statusEmoji[mappedStatus] ?? '📌'} <code>${code}</code> ${esc(updTask.title)} → <b>${mappedStatus.replace(/_/g, ' ')}</b>${linkSuffix}`
+            `• ${statusEmoji[mappedStatus] ?? '📌'} <code>${code}</code> ${esc(updTask.title)} → <b>${mappedStatus.replace(/_/g, ' ')}</b>${linkSuffix}${noteSuffix}`
           )
         }
 
