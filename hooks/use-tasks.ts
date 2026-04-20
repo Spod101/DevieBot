@@ -5,6 +5,29 @@ import { createClient } from '@/lib/supabase/client'
 import type { Task, TaskStatus, Member } from '@/types/database'
 import { toast } from 'sonner'
 
+const TASK_UPDATE_FIELDS = [
+  'title',
+  'description',
+  'priority',
+  'status',
+  'due_date',
+  'order_index',
+  'camp_id',
+  'assigned_to',
+] as const
+
+function sanitizeTaskUpdatePayload(updates: Partial<Task>) {
+  const safe: Partial<Task> = {}
+
+  for (const key of TASK_UPDATE_FIELDS) {
+    if (updates[key] !== undefined) {
+      safe[key] = updates[key] as any
+    }
+  }
+
+  return safe
+}
+
 export function useTasks(campId?: string | null) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
@@ -106,8 +129,9 @@ export function useTasks(campId?: string | null) {
 
   async function updateTask(id: string, updates: Partial<Task>) {
     const { tags, ...rest } = updates as any
+    const safeUpdates = sanitizeTaskUpdatePayload(rest)
 
-    const { error } = await supabase.from('tasks').update(rest).eq('id', id)
+    const { error } = await supabase.from('tasks').update(safeUpdates).eq('id', id)
     if (error) {
       toast.error('Failed to update task')
       return

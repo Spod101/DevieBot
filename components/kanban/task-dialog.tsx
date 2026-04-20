@@ -103,7 +103,8 @@ export function TaskDialog({ task, open, onClose, onSave, onDelete, defaultStatu
       ? (selectedMember.name ?? selectedMember.telegram_username ?? selectedMember.telegram_id ?? null)
       : null
     await onSave({
-      ...task,
+      id: task?.id,
+      camp_id: task?.camp_id ?? null,
       title: title.trim(),
       description: description || null,
       priority,
