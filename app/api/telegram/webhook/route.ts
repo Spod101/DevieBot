@@ -5,46 +5,8 @@ import {
   VALID_STANDUP_FILTERS, type StandupFilter,
 } from '@/lib/standup'
 import { parseBulkTasks, parseMessage, parseStatus, cleanTaskTitle } from '@/lib/nlp'
+import { addDaysToISODate, getTodayInAppTimeZoneISO } from '@/lib/date'
 import type { TaskStatus } from '@/types/database'
-
-const APP_TIME_ZONE = process.env.APP_TIME_ZONE || 'Asia/Manila'
-
-function getTodayInAppTimeZoneISO(): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: APP_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date())
-
-  const year = parts.find((part) => part.type === 'year')?.value
-  const month = parts.find((part) => part.type === 'month')?.value
-  const day = parts.find((part) => part.type === 'day')?.value
-
-  if (!year || !month || !day) {
-    const fallback = new Date()
-    const y = fallback.getFullYear()
-    const m = String(fallback.getMonth() + 1).padStart(2, '0')
-    const d = String(fallback.getDate()).padStart(2, '0')
-    return `${y}-${m}-${d}`
-  }
-
-  return `${year}-${month}-${day}`
-}
-
-function toUTCISODate(d: Date): string {
-  const year = d.getUTCFullYear()
-  const month = String(d.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(d.getUTCDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function addDaysToISODate(isoDate: string, days: number): string {
-  const [year, month, day] = isoDate.split('-').map(Number)
-  const utc = new Date(Date.UTC(year, month - 1, day))
-  utc.setUTCDate(utc.getUTCDate() + days)
-  return toUTCISODate(utc)
-}
 
 /** Returns a due date 7 days from today (ISO YYYY-MM-DD) */
 function defaultDueDate(): string {

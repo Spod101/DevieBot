@@ -1,54 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { TaskStatus } from '@/types/database'
+import { addDaysToISODate, getTodayInAppTimeZoneISO, getWeekdayFromISODate } from '@/lib/date'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-
-const APP_TIME_ZONE = 'Asia/Manila'
-
-function getTodayInAppTimeZoneISO(): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: APP_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date())
-
-  const year = parts.find((part) => part.type === 'year')?.value
-  const month = parts.find((part) => part.type === 'month')?.value
-  const day = parts.find((part) => part.type === 'day')?.value
-
-  if (!year || !month || !day) {
-    return toLocalISODate(new Date())
-  }
-
-  return `${year}-${month}-${day}`
-}
-
-function addDaysToISODate(isoDate: string, days: number): string {
-  const [year, month, day] = isoDate.split('-').map(Number)
-  const utc = new Date(Date.UTC(year, month - 1, day))
-  utc.setUTCDate(utc.getUTCDate() + days)
-  return toUTCISODate(utc)
-}
-
-function getWeekdayFromISODate(isoDate: string): number {
-  const [year, month, day] = isoDate.split('-').map(Number)
-  return new Date(Date.UTC(year, month - 1, day)).getUTCDay()
-}
-
-function toLocalISODate(d: Date): string {
-  const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function toUTCISODate(d: Date): string {
-  const year = d.getUTCFullYear()
-  const month = String(d.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(d.getUTCDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
 
 // ── BulkTask ──────────────────────────────────────────────────────────────────
 export type BulkTask = {
@@ -390,6 +344,88 @@ const THIS_DAY_TOKEN_RE = /\bthis\s+(sunday|sun|monday|mon|tuesday|tue|tues|wedn
 const NEXT_DAY_TOKEN_RE = /\bnext\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)\b/
 export const DEADLINE_KEYWORDS = /\b(by|due|until|before|deadline|tomorrow|tmr|tmrw|tonight|today|tdy|next\s+week|next\s+\w+day|in\s+\d+\s+days?|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat|sunday|sun|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i
 
+const MONTH_NAME_TO_INDEX: Record<string, number> = {
+  january: 1,
+  jan: 1,
+  february: 2,
+  feb: 2,
+  march: 3,
+  mar: 3,
+  april: 4,
+  apr: 4,
+  may: 5,
+  june: 6,
+  jun: 6,
+  july: 7,
+  jul: 7,
+  august: 8,
+  aug: 8,
+  september: 9,
+  sep: 9,
+  october: 10,
+  oct: 10,
+  november: 11,
+  nov: 11,
+  december: 12,
+  dec: 12,
+}
+
+function toUTCISODate(year: number, month: number, day: number): string {
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function cleanupDeadlineStrippedText(text: string): string {
+  return text
+    .replace(/\s+\b(by|due|until|before|for|on|at)\b\s*$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.;!?])/g, '$1')
+    .trim()
+}
+
+function stripPatternOutsideUrls(text: string, re: RegExp): string {
+  const urlRe = /https?:\/\/\S+/gi
+  let result = ''
+  let lastIndex = 0
+  let urlMatch: RegExpExecArray | null
+
+  while ((urlMatch = urlRe.exec(text)) !== null) {
+    const before = text.slice(lastIndex, urlMatch.index)
+    result += before.replace(re, ' ')
+    result += urlMatch[0]
+    lastIndex = urlMatch.index + urlMatch[0].length
+  }
+
+  result += text.slice(lastIndex).replace(re, ' ')
+  return cleanupDeadlineStrippedText(result)
+}
+
+function parseNumericDateToISO(month: number, day: number, year: number | null, todayISO: string): string | null {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  const [todayYear] = todayISO.split('-').map(Number)
+  let resolvedYear = year ?? todayYear
+  const candidate = new Date(Date.UTC(resolvedYear, month - 1, day))
+
+  if (candidate.getUTCFullYear() !== resolvedYear || candidate.getUTCMonth() + 1 !== month || candidate.getUTCDate() !== day) {
+    return null
+  }
+
+  let candidateISO = toUTCISODate(resolvedYear, month, day)
+  if (year === null && candidateISO < todayISO) {
+    resolvedYear += 1
+    const nextYearCandidate = new Date(Date.UTC(resolvedYear, month - 1, day))
+    if (
+      nextYearCandidate.getUTCFullYear() !== resolvedYear ||
+      nextYearCandidate.getUTCMonth() + 1 !== month ||
+      nextYearCandidate.getUTCDate() !== day
+    ) {
+      return null
+    }
+    candidateISO = toUTCISODate(resolvedYear, month, day)
+  }
+
+  return candidateISO
+}
+
 /**
  * Extract a due date from natural language text.
  * URLs are stripped before deadline detection to prevent false positives.
@@ -405,14 +441,11 @@ export async function extractDueDate(text: string): Promise<{ dueDate: string | 
   }
 
   const lower = textWithoutUrls.toLowerCase()
+  const phrasePrefix = '(?:\\b(?:by|due|until|before|for|on|at)\\s+)?'
 
   // Helper: strip deadline prepositions + the matched phrase from the ORIGINAL text (preserving URLs).
   // Also removes any dangling preposition left at the end (e.g. "prepare ppt for tomorrow" → "prepare ppt").
-  const DANGLING = /\s+\b(by|due|until|before|for|on|at)\b\s*$/i
-  const strip = (re: RegExp) =>
-    text.replace(new RegExp(`(?:(?:by|due|until|before|for|on|at)\\s+)?${re.source}`, 'gi'), '')
-      .replace(DANGLING, '')
-      .replace(/\s{2,}/g, ' ').trim()
+  const strip = (re: RegExp) => stripPatternOutsideUrls(text, new RegExp(`${phrasePrefix}${re.source}`, 'gi'))
 
   // ── today / tonight ──────────────────────────────────────────────────────
   if (/\b(today|tdy|tonight)\b/.test(lower)) {
@@ -430,7 +463,7 @@ export async function extractDueDate(text: string): Promise<{ dueDate: string | 
     const days = parseInt(inDays[1], 10)
     return {
       dueDate: addDaysToISODate(todayStr, days),
-      cleanText: text.replace(/\bin\s+\d+\s+days?\b/gi, '').replace(DANGLING, '').replace(/\s{2,}/g, ' ').trim(),
+      cleanText: stripPatternOutsideUrls(text, new RegExp(`${phrasePrefix}in\\s+\\d+\\s+days?`, 'gi')),
     }
   }
 
@@ -451,12 +484,11 @@ export async function extractDueDate(text: string): Promise<{ dueDate: string | 
       const currentDay = getWeekdayFromISODate(todayStr)
       let diff = targetDay - currentDay
 
+      if (diff < 0) diff += 7
       if (nextDayMatch) {
-        if (diff <= 0) diff += 7
+        diff += 7
       } else if (thisDayMatch) {
         if (diff < 0) diff += 7
-      } else if (diff <= 0) {
-        diff += 7
       }
 
       return {
@@ -466,28 +498,45 @@ export async function extractDueDate(text: string): Promise<{ dueDate: string | 
     }
   }
 
-  // ── Claude fallback for complex patterns (e.g. "April 20", "end of month") ─
-  try {
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5',
-      max_tokens: 80,
-      system: `Today is ${todayStr}.
-Extract any deadline from the text. Return ONLY a JSON object:
-- "dueDate": YYYY-MM-DD format, or null
-- "cleanText": text with the deadline phrase removed (trimmed), preserving any URLs verbatim
-Return ONLY raw JSON, no markdown.`,
-      messages: [{ role: 'user', content: text }],
-    })
-    const raw = (response.content[0] as { type: string; text: string }).text.trim()
-    const parsed = JSON.parse(raw)
-    const dueDate = typeof parsed.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.dueDate)
-      ? parsed.dueDate : null
-    const cleanText = typeof parsed.cleanText === 'string' && parsed.cleanText.trim()
-      ? parsed.cleanText.trim() : text
-    return { dueDate, cleanText }
-  } catch {
-    return { dueDate: null, cleanText: text }
+  // ── month name date (e.g. "Apr 23", "April 23, 2026") ────────────────
+  const monthNameMatch = lower.match(/\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{2,4}))?\b/)
+  if (monthNameMatch) {
+    const month = MONTH_NAME_TO_INDEX[monthNameMatch[1]]
+    const day = parseInt(monthNameMatch[2], 10)
+    const rawYear = monthNameMatch[3] ? parseInt(monthNameMatch[3], 10) : null
+    const year = rawYear === null ? null : (rawYear < 100 ? 2000 + rawYear : rawYear)
+    const dueDate = parseNumericDateToISO(month, day, year, todayStr)
+    if (dueDate) {
+      return {
+        dueDate,
+        cleanText: stripPatternOutsideUrls(
+          text,
+          new RegExp(`${phrasePrefix}${monthNameMatch[1]}\\s+${monthNameMatch[2]}(?:st|nd|rd|th)?(?:,?\\s*${monthNameMatch[3] ?? '\\d{2,4}'})?`, 'gi')
+        ),
+      }
+    }
   }
+
+  // ── numeric date (e.g. "4/23", "04-23-2026", "4/23/26") ────────────
+  const numericDateMatch = lower.match(/\b(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?\b/)
+  if (numericDateMatch) {
+    const month = parseInt(numericDateMatch[1], 10)
+    const day = parseInt(numericDateMatch[2], 10)
+    const rawYear = numericDateMatch[3] ? parseInt(numericDateMatch[3], 10) : null
+    const year = rawYear === null ? null : (rawYear < 100 ? 2000 + rawYear : rawYear)
+    const dueDate = parseNumericDateToISO(month, day, year, todayStr)
+    if (dueDate) {
+      const numericPattern = numericDateMatch[3]
+        ? `${numericDateMatch[1]}[\\/-]${numericDateMatch[2]}[\\/-]${numericDateMatch[3]}`
+        : `${numericDateMatch[1]}[\\/-]${numericDateMatch[2]}`
+      return {
+        dueDate,
+        cleanText: stripPatternOutsideUrls(text, new RegExp(`${phrasePrefix}${numericPattern}`, 'gi')),
+      }
+    }
+  }
+
+  return { dueDate: null, cleanText: text }
 }
 
 // ── cleanTaskTitle ────────────────────────────────────────────────────────────
@@ -501,29 +550,19 @@ export async function cleanTaskTitle(text: string): Promise<{
   priority: 'low' | 'medium' | 'high' | 'urgent'
   dueDate: string | null
 }> {
-  const today = getTodayInAppTimeZoneISO()
-  try {
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5',
-      max_tokens: 120,
-      system: `Today is ${today}.
-You extract task metadata from raw task text.
-Return ONLY a JSON object with these fields:
-- "title": the clean task title. Strip ALL of the following from it: priority words (low/medium/high/urgent), the word "priority" itself, deadline phrases (today/tomorrow/by Friday/until Monday/in 3 days/etc), prepositions left dangling after stripping (by/until/for/on/at/before). Keep only the core action.
-- "priority": one of low|medium|high|urgent — inferred from words like "urgent", "high priority", "ASAP", "low". Default "medium".
-- "dueDate": YYYY-MM-DD if a deadline is mentioned, else null. Treat shorthand date tokens as valid deadlines too (e.g. tdy, tmr, tmrw, mon, tue, wed, thu, thurs, fri).
-Return ONLY raw JSON, no markdown.`,
-      messages: [{ role: 'user', content: text }],
-    })
-    const raw = (response.content[0] as { type: string; text: string }).text.trim()
-    const parsed = JSON.parse(raw)
-    return {
-      title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : text,
-      priority: ['low', 'medium', 'high', 'urgent'].includes(parsed.priority) ? parsed.priority : 'medium',
-      dueDate: typeof parsed.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.dueDate) ? parsed.dueDate : null,
-    }
-  } catch {
-    return { title: text, priority: 'medium', dueDate: null }
+  const { dueDate, cleanText } = await extractDueDate(text)
+  const withoutPriority = cleanText
+    .replace(/\b(?:priority\s*[:=-]?\s*)?(urgent|high|medium|low)\s+priority\b/gi, '')
+    .replace(/\bpriority\s*[:=-]?\s*(urgent|high|medium|low)\b/gi, '')
+    .replace(/\b(urgent|high|medium|low)\b/gi, '')
+    .replace(/\b(asap|immediately|critical|p0|p1)\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+
+  return {
+    title: withoutPriority || cleanText || text,
+    priority: inferPriority(text),
+    dueDate,
   }
 }
 
