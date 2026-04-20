@@ -3,6 +3,13 @@ import type { TaskStatus } from '@/types/database'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
+function toLocalISODate(d: Date): string {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 // ── BulkTask ──────────────────────────────────────────────────────────────────
 export type BulkTask = {
   assignee: string
@@ -186,7 +193,7 @@ async function parseBulkTasksHeuristic(message: string): Promise<BulkTask[]> {
 }
 
 export async function parseBulkTasks(message: string): Promise<BulkTask[]> {
-  const today = new Date().toISOString().split('T')[0]
+  const today = toLocalISODate(new Date())
   const systemPrompt = `You are a task extractor for a project management bot.
 The user will send text that assigns work to one or more people via @mentions.
 Extract every actionable task and return ONLY a JSON array.
@@ -218,7 +225,7 @@ EXTRACTION RULES:
 - "title": concise action (max 70 chars). Strip label prefixes like "Action Plan:", "Note:", "FYI:", "Task:", "Update:"
 - "description": any supporting context, details, or URLs within that paragraph BEYOND the main action verb phrase. Preserve URLs verbatim. null if nothing extra.
 - "priority": "low"|"medium"|"high"|"urgent" — infer from urgency words, default "medium"
-- "dueDate": YYYY-MM-DD if a deadline is mentioned (today, tomorrow, weekday name, "by Friday", "in 3 days"), else null. Apply deadline to all tasks in the same paragraph if mentioned once.
+- "dueDate": YYYY-MM-DD if a deadline is mentioned (today, tomorrow, shorthand like tdy/tmr/tmrw, weekday names or abbreviations like mon/tue/wed/thu/thurs/fri/sat/sun, "by Friday", "in 3 days"), else null. Apply deadline to all tasks in the same paragraph if mentioned once.
 - Strip deadline phrases from title but keep them in dueDate.
 - NEVER discard URLs — put them in description if not in title.
 - Return ONLY a raw JSON array. No markdown, no explanation.
@@ -318,9 +325,29 @@ If the text does not clearly indicate a task status, return exactly: null`,
 
 // ── extractDueDate ────────────────────────────────────────────────────────────
 // Gate — only call extractDueDate when these keywords are present (checked on URL-stripped text)
-export const DEADLINE_KEYWORDS = /\b(by|due|until|before|deadline|tomorrow|tonight|today|next\s+week|next\s+\w+day|in\s+\d+\s+days?|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i
-
-const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+const DAY_NAME_TO_INDEX: Record<string, number> = {
+  sunday: 0,
+  sun: 0,
+  monday: 1,
+  mon: 1,
+  tuesday: 2,
+  tue: 2,
+  tues: 2,
+  wednesday: 3,
+  wed: 3,
+  thursday: 4,
+  thu: 4,
+  thur: 4,
+  thurs: 4,
+  friday: 5,
+  fri: 5,
+  saturday: 6,
+  sat: 6,
+}
+const DAY_TOKEN_RE = /\b(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)\b/
+const THIS_DAY_TOKEN_RE = /\bthis\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)\b/
+const NEXT_DAY_TOKEN_RE = /\bnext\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)\b/
+export const DEADLINE_KEYWORDS = /\b(by|due|until|before|deadline|tomorrow|tmr|tmrw|tonight|today|tdy|next\s+week|next\s+\w+day|in\s+\d+\s+days?|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat|sunday|sun|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i
 
 /**
  * Extract a due date from natural language text.
@@ -330,7 +357,7 @@ const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'frid
 export async function extractDueDate(text: string): Promise<{ dueDate: string | null; cleanText: string }> {
   const base = new Date()
   base.setHours(0, 0, 0, 0)
-  const todayStr = base.toISOString().split('T')[0]
+  const todayStr = toLocalISODate(base)
 
   // Strip URLs before deadline keyword detection — URLs may contain words like "by", "today", etc.
   const textWithoutUrls = text.replace(/https?:\/\/\S+/g, '')
@@ -349,14 +376,14 @@ export async function extractDueDate(text: string): Promise<{ dueDate: string | 
       .replace(/\s{2,}/g, ' ').trim()
 
   // ── today / tonight ──────────────────────────────────────────────────────
-  if (/\b(today|tonight)\b/.test(lower)) {
-    return { dueDate: todayStr, cleanText: strip(/today|tonight/) }
+  if (/\b(today|tdy|tonight)\b/.test(lower)) {
+    return { dueDate: todayStr, cleanText: strip(/today|tdy|tonight/) }
   }
 
   // ── tomorrow ─────────────────────────────────────────────────────────────
-  if (/\btomorrow\b/.test(lower)) {
+  if (/\b(tomorrow|tmr|tmrw)\b/.test(lower)) {
     const d = new Date(base); d.setDate(d.getDate() + 1)
-    return { dueDate: d.toISOString().split('T')[0], cleanText: strip(/tomorrow/) }
+    return { dueDate: toLocalISODate(d), cleanText: strip(/tomorrow|tmr|tmrw/) }
   }
 
   // ── "in N days" ──────────────────────────────────────────────────────────
@@ -364,7 +391,7 @@ export async function extractDueDate(text: string): Promise<{ dueDate: string | 
   if (inDays) {
     const d = new Date(base); d.setDate(d.getDate() + parseInt(inDays[1]))
     return {
-      dueDate: d.toISOString().split('T')[0],
+      dueDate: toLocalISODate(d),
       cleanText: text.replace(/\bin\s+\d+\s+days?\b/gi, '').replace(DANGLING, '').replace(/\s{2,}/g, ' ').trim(),
     }
   }
@@ -372,19 +399,34 @@ export async function extractDueDate(text: string): Promise<{ dueDate: string | 
   // ── next week ────────────────────────────────────────────────────────────
   if (/\bnext\s+week\b/.test(lower)) {
     const d = new Date(base); d.setDate(d.getDate() + 7)
-    return { dueDate: d.toISOString().split('T')[0], cleanText: strip(/next\s+week/) }
+    return { dueDate: toLocalISODate(d), cleanText: strip(/next\s+week/) }
   }
 
   // ── weekday names (next occurrence) ──────────────────────────────────────
-  for (let i = 0; i < DAY_NAMES.length; i++) {
-    if (new RegExp(`\\b${DAY_NAMES[i]}\\b`).test(lower)) {
+  const thisDayMatch = lower.match(THIS_DAY_TOKEN_RE)
+  const nextDayMatch = lower.match(NEXT_DAY_TOKEN_RE)
+  const dayMatch = lower.match(DAY_TOKEN_RE)
+
+  const matchedToken = thisDayMatch?.[1] ?? nextDayMatch?.[1] ?? dayMatch?.[1]
+  if (matchedToken) {
+    const targetDay = DAY_NAME_TO_INDEX[matchedToken]
+    if (typeof targetDay === 'number') {
       const d = new Date(base)
-      let diff = i - d.getDay()
-      if (diff <= 0) diff += 7
+      const currentDay = d.getDay()
+      let diff = targetDay - currentDay
+
+      if (nextDayMatch) {
+        if (diff <= 0) diff += 7
+      } else if (thisDayMatch) {
+        if (diff < 0) diff += 7
+      } else if (diff <= 0) {
+        diff += 7
+      }
+
       d.setDate(d.getDate() + diff)
       return {
-        dueDate: d.toISOString().split('T')[0],
-        cleanText: strip(new RegExp(DAY_NAMES[i])),
+        dueDate: toLocalISODate(d),
+        cleanText: strip(new RegExp(`this\\s+${matchedToken}|next\\s+${matchedToken}|${matchedToken}`)),
       }
     }
   }
@@ -424,7 +466,7 @@ export async function cleanTaskTitle(text: string): Promise<{
   priority: 'low' | 'medium' | 'high' | 'urgent'
   dueDate: string | null
 }> {
-  const today = new Date().toISOString().split('T')[0]
+  const today = toLocalISODate(new Date())
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5',
@@ -434,7 +476,7 @@ You extract task metadata from raw task text.
 Return ONLY a JSON object with these fields:
 - "title": the clean task title. Strip ALL of the following from it: priority words (low/medium/high/urgent), the word "priority" itself, deadline phrases (today/tomorrow/by Friday/until Monday/in 3 days/etc), prepositions left dangling after stripping (by/until/for/on/at/before). Keep only the core action.
 - "priority": one of low|medium|high|urgent — inferred from words like "urgent", "high priority", "ASAP", "low". Default "medium".
-- "dueDate": YYYY-MM-DD if a deadline is mentioned, else null.
+- "dueDate": YYYY-MM-DD if a deadline is mentioned, else null. Treat shorthand date tokens as valid deadlines too (e.g. tdy, tmr, tmrw, mon, tue, wed, thu, thurs, fri).
 Return ONLY raw JSON, no markdown.`,
       messages: [{ role: 'user', content: text }],
     })
@@ -466,7 +508,7 @@ export async function parseMessage(
   message: string,
   context: { camps: string[]; recentTasks: { id: string; title: string; status: string; task_number?: number | null }[] }
 ): Promise<ParsedIntent> {
-  const today = new Date().toISOString().split('T')[0]
+  const today = toLocalISODate(new Date())
   const campsContext = context.camps.length
     ? `Active code camps: ${context.camps.join(', ')}`
     : 'No code camps yet.'
@@ -505,7 +547,7 @@ Rules:
 - If no priority mentioned, default to "medium"
 - If no camp mentioned, omit campName or set to null
 - If no assignee (@mention) present, omit assignedTo or set to null
-- Extract due date from natural language (e.g. "by Friday", "due tomorrow", "in 3 days", "next Monday", "April 20")
+- Extract due date from natural language (e.g. "by Friday", "due tomorrow", "in 3 days", "next Monday", "April 20", shorthand like "tmr", "tmrw", "thu", "thurs")
   and convert to YYYY-MM-DD format. If no deadline mentioned, set dueDate to null
 - For status updates, map natural language to the correct enum value using these patterns:
   * "I'm working on X" / "started X" / "picking up X" / "currently on X" / "wip" → in_progress
