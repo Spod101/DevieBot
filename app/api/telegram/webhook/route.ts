@@ -39,7 +39,7 @@ function taskAddedMsg(task: {
   due_date?: string | null
   assigned_to?: string | null
   camp_id?: string | null
-}, campName?: string | null): string {
+}, campName?: string | null, link?: string): string {
   const dot   = PRIORITY_EMOJI[task.priority] ?? '🔵'
   const pri   = task.priority.charAt(0).toUpperCase() + task.priority.slice(1)
   const where = campName ? ` · ${esc(campName)}` : ''
@@ -51,6 +51,7 @@ function taskAddedMsg(task: {
   ]
   if (task.assigned_to) lines.push(`👤 Assigned to: ${esc(task.assigned_to)}`)
   if (task.due_date)    lines.push(`📅 Due: ${new Date(task.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`)
+  if (link)             lines.push(`🔗 <a href="${link}">Link</a>`)
   lines.push(`🪪 ID: <code>${code}</code>`)
   lines.push('')
   lines.push(`<i>Refresh the dashboard to see your changes.</i>`)
@@ -140,6 +141,17 @@ async function fetchTaskPages(
     .order('priority', { ascending: false })
     .limit(200)
 
+  const taskIds = (tasks ?? []).map((t: any) => t.id)
+  const { data: commentRows } = taskIds.length
+    ? await supabase.from('task_comments').select('task_id, content').in('task_id', taskIds).ilike('content', 'http%').order('created_at', { ascending: false })
+    : { data: [] as { task_id: string; content: string }[] }
+
+  // Latest URL comment per task
+  const taskLinkMap = new Map<string, string>()
+  for (const c of (commentRows ?? [])) {
+    if (!taskLinkMap.has(c.task_id)) taskLinkMap.set(c.task_id, c.content)
+  }
+
   const { data: memberRows } = await supabase
     .from('members')
     .select('name, telegram_username, role')
@@ -172,7 +184,9 @@ async function fetchTaskPages(
     if (assigneeFilter && assigneeKey(name) !== assigneeFilter) continue
 
     const code = t.task_number ? `T-${String(t.task_number).padStart(3, '0')}` : t.id.slice(0, 6)
-    const line = `  • <code>${code}</code> ${esc(t.title)}`
+    const link = taskLinkMap.get(t.id)
+    const linkPart = link ? ` · <a href="${link}">🔗</a>` : ''
+    const line = `  • <code>${code}</code> ${esc(t.title)}${linkPart}`
 
     if (!memberBuckets.has(name)) memberBuckets.set(name, { name, role, byStatus: {} })
     const bucket = memberBuckets.get(name)!
@@ -271,8 +285,14 @@ function normalizeStatusInput(value: string): string {
     .replace(/[\s-]+/g, '_')
 }
 
-function splitRefAndStatus(segment: string): { ref: string; statusRaw: string } | null {
-  const part = segment.trim()
+function extractLink(input: string): { text: string; link?: string } {
+  const match = input.match(/\s+link:(https?:\/\/\S+)/i)
+  if (match) return { text: input.slice(0, match.index).trim(), link: match[1] }
+  return { text: input }
+}
+
+function splitRefAndStatus(segment: string): { ref: string; statusRaw: string; link?: string } | null {
+  const { text: part, link } = extractLink(segment.trim())
   if (!part) return null
 
   const tail = part.match(new RegExp(`^(.*?)\\s+(${STATUS_TAIL_PATTERN})$`, 'i'))
@@ -280,7 +300,7 @@ function splitRefAndStatus(segment: string): { ref: string; statusRaw: string } 
     const ref = tail[1].trim()
     const statusRaw = tail[2].trim()
     if (!ref || !statusRaw) return null
-    return { ref, statusRaw }
+    return { ref, statusRaw, link }
   }
 
   const tokens = part.split(/\s+/)
@@ -288,14 +308,15 @@ function splitRefAndStatus(segment: string): { ref: string; statusRaw: string } 
   return {
     ref: tokens[0],
     statusRaw: tokens.slice(1).join(' '),
+    link,
   }
 }
 
-function parseUpdateSpecs(raw: string): Array<{ ref: string; statusRaw: string }> {
+function parseUpdateSpecs(raw: string): Array<{ ref: string; statusRaw: string; link?: string }> {
   const input = raw.trim()
   if (!input) return []
 
-  // Shared trailing status: "t21,t22,t23 done"
+  // Shared trailing status: "t21,t22,t23 done" (no link support for shared-status bulk)
   const shared = input.match(new RegExp(`^(.+?)\\s+(${STATUS_TAIL_PATTERN})$`, 'i'))
   if (shared) {
     const refsPart = shared[1]
@@ -317,7 +338,7 @@ function parseUpdateSpecs(raw: string): Array<{ ref: string; statusRaw: string }
 
   return parts
     .map(splitRefAndStatus)
-    .filter((spec): spec is { ref: string; statusRaw: string } => spec !== null)
+    .filter((spec): spec is { ref: string; statusRaw: string; link?: string } => spec !== null)
 }
 
 // Accept "T-001", "t001", "1" (task_number) or a UUID prefix
@@ -803,8 +824,10 @@ export async function POST(request: Request) {
             `/update login blocked\n` +
             `/update t21,t22,t23 done\n` +
             `/update t21 done, t22 review, t23 inprogress\n` +
-            `/update t31 done\nt30 done\nt32 done\n\n` +
-            `<i>Valid statuses: backlog · todo · in progress · in review · blocked · done</i>`
+            `/update t31 done\nt30 done\nt32 done\n` +
+            `/update T-001 done link:https://github.com/...\n\n` +
+            `<i>Valid statuses: backlog · todo · in progress · in review · blocked · done</i>\n` +
+            `<i>Optionally append <code>link:&lt;url&gt;</code> to attach a link as a comment.</i>`
           )
           return NextResponse.json({ ok: true })
         }
@@ -850,9 +873,13 @@ export async function POST(request: Request) {
 
           const updTask = updTasks[0]
           await supabase.from('tasks').update({ status: mappedStatus }).eq('id', updTask.id)
+          if (spec.link) {
+            await supabase.from('task_comments').insert({ task_id: updTask.id, content: spec.link })
+          }
           const code = updTask.task_number ? `T-${String(updTask.task_number).padStart(3, '0')}` : updTask.id.slice(0, 6)
+          const linkSuffix = spec.link ? `\n  🔗 ${spec.link}` : ''
           updatedLines.push(
-            `• ${statusEmoji[mappedStatus] ?? '📌'} <code>${code}</code> ${esc(updTask.title)} → <b>${mappedStatus.replace(/_/g, ' ')}</b>`
+            `• ${statusEmoji[mappedStatus] ?? '📌'} <code>${code}</code> ${esc(updTask.title)} → <b>${mappedStatus.replace(/_/g, ' ')}</b>${linkSuffix}`
           )
         }
 
@@ -920,7 +947,8 @@ export async function POST(request: Request) {
         // Simple title (no flags, no @, no commas) → NLP-clean then insert
         const isSimple = !rawRest.includes('--') && mentionsInRest.length === 0 && !rawRest.includes(',')
         if (isSimple) {
-          const cleaned = await cleanTaskTitle(rest)
+          const { text: simpleInput, link: simpleLink } = extractLink(rest)
+          const cleaned = await cleanTaskTitle(simpleInput || rest)
           const { title: parsedTitle, assignee } = await resolveAssigneeByName(cleaned.title, supabase)
           const finalTitle = parsedTitle || cleaned.title
           const due = cleaned.dueDate ?? defaultDueDate()
@@ -931,7 +959,8 @@ export async function POST(request: Request) {
           if (error || !task) {
             await reply('❌ Something went wrong while creating the task. Please try again.')
           } else {
-            await reply(taskAddedMsg({ ...task, priority: cleaned.priority, due_date: due, assigned_to: assignee }))
+            if (simpleLink) await supabase.from('task_comments').insert({ task_id: task.id, content: simpleLink })
+            await reply(taskAddedMsg({ ...task, priority: cleaned.priority, due_date: due, assigned_to: assignee }, null, simpleLink))
           }
           return NextResponse.json({ ok: true })
         }
@@ -940,8 +969,9 @@ export async function POST(request: Request) {
         const hasSingleMention = mentionsInRest.length === 1 && !rawRest.includes('--') && !rawRest.includes(',')
         if (hasSingleMention) {
           const username = mentionsInRest[0][1].toLowerCase()
-          const withoutMention = rawRest.replace(/@\w+/g, '').replace(/\s+/g, ' ').trim()
-          const cleaned = await cleanTaskTitle(withoutMention)
+          const withoutMentionRaw = rawRest.replace(/@\w+/g, '').replace(/\s+/g, ' ').trim()
+          const { text: withoutMention, link: mentionLink } = extractLink(withoutMentionRaw)
+          const cleaned = await cleanTaskTitle(withoutMention || withoutMentionRaw)
           if (!cleaned.title) {
             await reply('❌ Task title cannot be empty.')
             return NextResponse.json({ ok: true })
@@ -968,10 +998,16 @@ export async function POST(request: Request) {
             if (error || !created) {
               await reply('❌ Something went wrong while creating the tasks. Please try again.')
             } else {
+              if (mentionLink) {
+                await supabase.from('task_comments').insert(
+                  created.map((t: any) => ({ task_id: t.id, content: mentionLink }))
+                )
+              }
               const memberList = members.map(m => `• ${esc(m.name ?? m.telegram_username ?? '—')}`).join('\n')
+              const linkLine = mentionLink ? `\n🔗 <a href="${mentionLink}">Link</a>` : ''
               await reply(
                 `✅ Task assigned to all <b>${created.length}</b> member${created.length !== 1 ? 's' : ''}\n\n` +
-                `📝 <b>${esc(cleaned.title)}</b>\n${memberList}\n\n` +
+                `📝 <b>${esc(cleaned.title)}</b>\n${memberList}${linkLine}\n\n` +
                 `<i>Refresh the dashboard to see the changes.</i>`
               )
             }
@@ -991,15 +1027,21 @@ export async function POST(request: Request) {
             if (error || !created) {
               await reply('❌ Something went wrong while creating the tasks. Please try again.')
             } else {
+              if (mentionLink) {
+                await supabase.from('task_comments').insert(
+                  created.map((t: any) => ({ task_id: t.id, content: mentionLink }))
+                )
+              }
               const memberList = roleMembers
                 .map(m => `• ${esc(m.name ?? m.telegram_username ?? '—')}`)
                 .join('\n')
               const code = created[0]?.task_number
                 ? `T-${String(created[0].task_number).padStart(3, '0')}…`
                 : ''
+              const linkLine = mentionLink ? `\n🔗 <a href="${mentionLink}">Link</a>` : ''
               await reply(
                 `✅ Task assigned to <b>${created.length}</b> member${created.length !== 1 ? 's' : ''} in <b>${esc(username)}</b>${code ? ` · <code>${code}</code>` : ''}\n\n` +
-                `📝 <b>${esc(cleaned.title)}</b>\n${memberList}\n\n` +
+                `📝 <b>${esc(cleaned.title)}</b>\n${memberList}${linkLine}\n\n` +
                 `<i>Refresh the dashboard to see the changes.</i>`
               )
             }
@@ -1015,7 +1057,8 @@ export async function POST(request: Request) {
           if (error || !task) {
             await reply('❌ Something went wrong while creating the task. Please try again.')
           } else {
-            await reply(taskAddedMsg({ ...task, priority: cleaned.priority, due_date: due, assigned_to: assignedName }))
+            if (mentionLink) await supabase.from('task_comments').insert({ task_id: task.id, content: mentionLink })
+            await reply(taskAddedMsg({ ...task, priority: cleaned.priority, due_date: due, assigned_to: assignedName }, null, mentionLink))
           }
           return NextResponse.json({ ok: true })
         }
