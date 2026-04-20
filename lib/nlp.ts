@@ -3,10 +3,50 @@ import type { TaskStatus } from '@/types/database'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
+const APP_TIME_ZONE = 'Asia/Manila'
+
+function getTodayInAppTimeZoneISO(): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: APP_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+
+  const year = parts.find((part) => part.type === 'year')?.value
+  const month = parts.find((part) => part.type === 'month')?.value
+  const day = parts.find((part) => part.type === 'day')?.value
+
+  if (!year || !month || !day) {
+    return toLocalISODate(new Date())
+  }
+
+  return `${year}-${month}-${day}`
+}
+
+function addDaysToISODate(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate.split('-').map(Number)
+  const utc = new Date(Date.UTC(year, month - 1, day))
+  utc.setUTCDate(utc.getUTCDate() + days)
+  return toUTCISODate(utc)
+}
+
+function getWeekdayFromISODate(isoDate: string): number {
+  const [year, month, day] = isoDate.split('-').map(Number)
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay()
+}
+
 function toLocalISODate(d: Date): string {
   const year = d.getFullYear()
   const month = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function toUTCISODate(d: Date): string {
+  const year = d.getUTCFullYear()
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
 
@@ -45,7 +85,8 @@ function foldContextNotes(tasks: Array<BulkTask & { _isContextNote?: boolean }>)
       }
     }
 
-    const { _isContextNote, ...clean } = task
+    const clean = { ...task }
+    delete clean._isContextNote
     folded.push(clean)
   }
   return folded
@@ -193,7 +234,7 @@ async function parseBulkTasksHeuristic(message: string): Promise<BulkTask[]> {
 }
 
 export async function parseBulkTasks(message: string): Promise<BulkTask[]> {
-  const today = toLocalISODate(new Date())
+  const today = getTodayInAppTimeZoneISO()
   const systemPrompt = `You are a task extractor for a project management bot.
 The user will send text that assigns work to one or more people via @mentions.
 Extract every actionable task and return ONLY a JSON array.
@@ -355,9 +396,7 @@ export const DEADLINE_KEYWORDS = /\b(by|due|until|before|deadline|tomorrow|tmr|t
  * Regex-first for common patterns — Claude fallback for complex phrases.
  */
 export async function extractDueDate(text: string): Promise<{ dueDate: string | null; cleanText: string }> {
-  const base = new Date()
-  base.setHours(0, 0, 0, 0)
-  const todayStr = toLocalISODate(base)
+  const todayStr = getTodayInAppTimeZoneISO()
 
   // Strip URLs before deadline keyword detection — URLs may contain words like "by", "today", etc.
   const textWithoutUrls = text.replace(/https?:\/\/\S+/g, '')
@@ -382,24 +421,22 @@ export async function extractDueDate(text: string): Promise<{ dueDate: string | 
 
   // ── tomorrow ─────────────────────────────────────────────────────────────
   if (/\b(tomorrow|tmr|tmrw)\b/.test(lower)) {
-    const d = new Date(base); d.setDate(d.getDate() + 1)
-    return { dueDate: toLocalISODate(d), cleanText: strip(/tomorrow|tmr|tmrw/) }
+    return { dueDate: addDaysToISODate(todayStr, 1), cleanText: strip(/tomorrow|tmr|tmrw/) }
   }
 
   // ── "in N days" ──────────────────────────────────────────────────────────
   const inDays = lower.match(/\bin\s+(\d+)\s+days?\b/)
   if (inDays) {
-    const d = new Date(base); d.setDate(d.getDate() + parseInt(inDays[1]))
+    const days = parseInt(inDays[1], 10)
     return {
-      dueDate: toLocalISODate(d),
+      dueDate: addDaysToISODate(todayStr, days),
       cleanText: text.replace(/\bin\s+\d+\s+days?\b/gi, '').replace(DANGLING, '').replace(/\s{2,}/g, ' ').trim(),
     }
   }
 
   // ── next week ────────────────────────────────────────────────────────────
   if (/\bnext\s+week\b/.test(lower)) {
-    const d = new Date(base); d.setDate(d.getDate() + 7)
-    return { dueDate: toLocalISODate(d), cleanText: strip(/next\s+week/) }
+    return { dueDate: addDaysToISODate(todayStr, 7), cleanText: strip(/next\s+week/) }
   }
 
   // ── weekday names (next occurrence) ──────────────────────────────────────
@@ -411,8 +448,7 @@ export async function extractDueDate(text: string): Promise<{ dueDate: string | 
   if (matchedToken) {
     const targetDay = DAY_NAME_TO_INDEX[matchedToken]
     if (typeof targetDay === 'number') {
-      const d = new Date(base)
-      const currentDay = d.getDay()
+      const currentDay = getWeekdayFromISODate(todayStr)
       let diff = targetDay - currentDay
 
       if (nextDayMatch) {
@@ -423,9 +459,8 @@ export async function extractDueDate(text: string): Promise<{ dueDate: string | 
         diff += 7
       }
 
-      d.setDate(d.getDate() + diff)
       return {
-        dueDate: toLocalISODate(d),
+        dueDate: addDaysToISODate(todayStr, diff),
         cleanText: strip(new RegExp(`this\\s+${matchedToken}|next\\s+${matchedToken}|${matchedToken}`)),
       }
     }
@@ -466,7 +501,7 @@ export async function cleanTaskTitle(text: string): Promise<{
   priority: 'low' | 'medium' | 'high' | 'urgent'
   dueDate: string | null
 }> {
-  const today = toLocalISODate(new Date())
+  const today = getTodayInAppTimeZoneISO()
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5',
@@ -508,7 +543,7 @@ export async function parseMessage(
   message: string,
   context: { camps: string[]; recentTasks: { id: string; title: string; status: string; task_number?: number | null }[] }
 ): Promise<ParsedIntent> {
-  const today = toLocalISODate(new Date())
+  const today = getTodayInAppTimeZoneISO()
   const campsContext = context.camps.length
     ? `Active code camps: ${context.camps.join(', ')}`
     : 'No code camps yet.'

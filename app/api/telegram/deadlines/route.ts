@@ -2,8 +2,47 @@ import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { sendTelegramMessage } from '@/lib/standup'
 
+const APP_TIME_ZONE = process.env.APP_TIME_ZONE || 'Asia/Manila'
+
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function getTodayInAppTimeZoneISO(): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: APP_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+
+  const year = parts.find((part) => part.type === 'year')?.value
+  const month = parts.find((part) => part.type === 'month')?.value
+  const day = parts.find((part) => part.type === 'day')?.value
+
+  if (!year || !month || !day) {
+    const fallback = new Date()
+    const y = fallback.getFullYear()
+    const m = String(fallback.getMonth() + 1).padStart(2, '0')
+    const d = String(fallback.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+
+  return `${year}-${month}-${day}`
+}
+
+function toUTCISODate(d: Date): string {
+  const year = d.getUTCFullYear()
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function addDaysToISODate(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate.split('-').map(Number)
+  const utc = new Date(Date.UTC(year, month - 1, day))
+  utc.setUTCDate(utc.getUTCDate() + days)
+  return toUTCISODate(utc)
 }
 
 /**
@@ -17,17 +56,9 @@ function esc(s: string): string {
 export async function POST() {
   try {
     const supabase = createServiceClient()
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const todayStr = today.toISOString().split('T')[0]
-
-    const tomorrow = new Date(today)
-    tomorrow.setDate(today.getDate() + 1)
-    const tomorrowStr = tomorrow.toISOString().split('T')[0]
-
-    const in3days = new Date(today)
-    in3days.setDate(today.getDate() + 3)
-    const in3Str = in3days.toISOString().split('T')[0]
+    const todayStr = getTodayInAppTimeZoneISO()
+    const tomorrowStr = addDaysToISODate(todayStr, 1)
+    const in3Str = addDaysToISODate(todayStr, 3)
 
     const { data: tasks } = await supabase
       .from('tasks')
@@ -58,8 +89,8 @@ export async function POST() {
       return `• <code>${code}</code> ${esc(t.title)}${badge}${assignee}`
     }
 
-    const dateStr = today.toLocaleDateString('en-PH', {
-      timeZone: 'Asia/Manila',
+    const dateStr = new Date().toLocaleDateString('en-PH', {
+      timeZone: APP_TIME_ZONE,
       weekday: 'long', month: 'long', day: 'numeric',
     })
 
@@ -99,16 +130,14 @@ export async function POST() {
 export async function GET() {
   try {
     const supabase = createServiceClient()
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const in7days = new Date(today)
-    in7days.setDate(today.getDate() + 7)
+    const todayStr = getTodayInAppTimeZoneISO()
+    const in7Str = addDaysToISODate(todayStr, 7)
 
     const { data: tasks } = await supabase
       .from('tasks')
       .select('id, task_number, title, due_date, priority, assigned_to, status')
       .not('due_date', 'is', null)
-      .lte('due_date', in7days.toISOString().split('T')[0])
+      .lte('due_date', in7Str)
       .neq('status', 'done')
       .order('due_date', { ascending: true })
 
