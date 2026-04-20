@@ -247,7 +247,18 @@ Example output:
       .map(item => sanitizeBulkTaskWithContext(item, fallbackAssignee))
       .filter((task): task is (BulkTask & { _isContextNote?: boolean }) => task !== null)
     const folded = foldContextNotes(normalized)
-    if (folded.length > 0) return folded
+    if (folded.length > 0) {
+      // Keep model extraction for task structure, but ground due dates using deterministic parsing.
+      // This prevents bulk-mode date hallucinations and aligns behavior with single-task parsing.
+      const heuristic = await parseBulkTasksHeuristic(message)
+      if (heuristic.length === folded.length) {
+        return folded.map((task, idx) => ({
+          ...task,
+          dueDate: heuristic[idx]?.dueDate ?? task.dueDate ?? null,
+        }))
+      }
+      return folded
+    }
   }
 
   return parseBulkTasksHeuristic(message)
