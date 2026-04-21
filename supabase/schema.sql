@@ -111,6 +111,18 @@ create table telegram_config (
   updated_at timestamptz default now()
 );
 
+-- ============================================================
+-- AUDIT LOGS
+-- ============================================================
+create table audit_logs (
+  id uuid primary key default uuid_generate_v4(),
+  action text not null,
+  status text not null check (status in ('ok', 'error', 'info')),
+  message text not null,
+  meta jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now()
+);
+
 -- Insert a default row
 insert into telegram_config (id) values (uuid_generate_v4());
 
@@ -145,6 +157,7 @@ alter table task_comments enable row level security;
 alter table members enable row level security;
 alter table task_assignments enable row level security;
 alter table telegram_config enable row level security;
+alter table audit_logs enable row level security;
 
 -- Allow authenticated users (admin) full access to everything
 create policy "Authenticated full access" on tasks
@@ -171,6 +184,9 @@ create policy "Authenticated full access" on task_assignments
 create policy "Authenticated full access" on telegram_config
   for all to authenticated using (true) with check (true);
 
+create policy "Authenticated full access" on audit_logs
+  for all to authenticated using (true) with check (true);
+
 -- Service role can access everything (for API routes/bot)
 create policy "Service role full access" on tasks
   for all to service_role using (true) with check (true);
@@ -194,6 +210,9 @@ create policy "Service role full access" on task_assignments
   for all to service_role using (true) with check (true);
 
 create policy "Service role full access" on telegram_config
+  for all to service_role using (true) with check (true);
+
+create policy "Service role full access" on audit_logs
   for all to service_role using (true) with check (true);
 
 -- ============================================================

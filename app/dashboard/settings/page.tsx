@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { TelegramConfig } from '@/types/database'
+import type { AuditLog, AuditLogStatus, TelegramConfig } from '@/types/database'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -112,7 +112,8 @@ export default function SettingsPage() {
   const [testing, setTesting]       = useState(false)
   const [previewMsg, setPreviewMsg] = useState<string | null>(null)
   const [previewing, setPreviewing] = useState(false)
-  const [logs, setLogs]             = useState<{ time: string; status: 'ok' | 'error' | 'info'; msg: string }[]>([])
+  const [auditLogs, setAuditLogs]   = useState<AuditLog[]>([])
+  const [loadingAudit, setLoadingAudit] = useState(false)
   const [webhookInfo, setWebhookInfo] = useState<{
     url?: string; last_error?: string; pending_count?: number
   } | null>(null)
@@ -120,11 +121,32 @@ export default function SettingsPage() {
   const [registeringWebhook,  setRegisteringWebhook]  = useState(false)
   const [syncingCommands,     setSyncingCommands]     = useState(false)
 
-  function addLog(status: 'ok' | 'error' | 'info', msg: string) {
-    const time = new Date().toLocaleTimeString('en-PH', {
+  async function fetchAuditLogs() {
+    setLoadingAudit(true)
+    const { data } = await supabase
+      .from('audit_logs')
+      .select('id, action, status, message, meta, created_at')
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+    setAuditLogs((data as AuditLog[]) ?? [])
+    setLoadingAudit(false)
+  }
+
+  async function addAuditLog(status: AuditLogStatus, msg: string, action = 'settings.activity') {
+    await supabase.from('audit_logs').insert({
+      action,
+      status,
+      message: msg,
+      meta: {},
+    })
+    await fetchAuditLogs()
+  }
+
+  function formatAuditTime(createdAt: string): string {
+    return new Date(createdAt).toLocaleTimeString('en-PH', {
       timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', second: '2-digit',
     })
-    setLogs(prev => [{ time, status, msg }, ...prev].slice(0, 20))
   }
 
   async function checkWebhook() {
@@ -134,12 +156,12 @@ export default function SettingsPage() {
       const data = await res.json()
       if (data.ok) {
         setWebhookInfo(data.result)
-        if (!data.result?.url) addLog('error', 'Webhook not registered')
-        else addLog('ok', `Webhook active: ${data.result.url}`)
+        if (!data.result?.url) await addAuditLog('error', 'Webhook not registered', 'settings.webhook.check')
+        else await addAuditLog('ok', `Webhook active: ${data.result.url}`, 'settings.webhook.check')
       } else {
-        addLog('error', data.error || 'Failed to check webhook')
+        await addAuditLog('error', data.error || 'Failed to check webhook', 'settings.webhook.check')
       }
-    } catch { addLog('error', 'Could not reach Telegram API') }
+    } catch { await addAuditLog('error', 'Could not reach Telegram API', 'settings.webhook.check') }
     setCheckingWebhook(false)
   }
 
@@ -151,36 +173,40 @@ export default function SettingsPage() {
       const data = await res.json()
       if (data.ok) {
         toast.success('Webhook registered!')
-        addLog('ok', `Registered webhook`)
+        await addAuditLog('ok', 'Registered webhook', 'settings.webhook.register')
         await checkWebhook()
       } else {
         toast.error(data.description || data.error || 'Failed')
-        addLog('error', data.description || data.error || 'Registration failed')
+        await addAuditLog('error', data.description || data.error || 'Registration failed', 'settings.webhook.register')
       }
-    } catch { addLog('error', 'Could not register webhook') }
+    } catch { await addAuditLog('error', 'Could not register webhook', 'settings.webhook.register') }
     setRegisteringWebhook(false)
   }
 
   async function handleSyncCommands() {
     if (!configured) { toast.error('Save your bot token first'); return }
     setSyncingCommands(true)
-    addLog('info', 'Syncing bot command list...')
+    await addAuditLog('info', 'Syncing bot command list...', 'settings.commands.sync')
     try {
       const base = process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin
       const res  = await fetch(`${base}/api/telegram/setup`)
       const data = await res.json()
       if (data.ok) {
         toast.success('Bot commands synced!')
-        addLog('ok', 'Command list updated on Telegram')
+        await addAuditLog('ok', 'Command list updated on Telegram', 'settings.commands.sync')
       } else {
         toast.error(data.description || 'Sync failed')
-        addLog('error', data.description || 'Command sync failed')
+        await addAuditLog('error', data.description || 'Command sync failed', 'settings.commands.sync')
       }
-    } catch { addLog('error', 'Could not reach Telegram API') }
+    } catch { await addAuditLog('error', 'Could not reach Telegram API', 'settings.commands.sync') }
     setSyncingCommands(false)
   }
 
-  useEffect(() => { fetchConfig(); checkWebhook() }, [])
+  useEffect(() => {
+    fetchConfig()
+    fetchAuditLogs()
+    checkWebhook()
+  }, [])
 
   async function fetchConfig() {
     const { data } = await supabase.from('telegram_config').select('*').limit(1).single()
@@ -199,28 +225,43 @@ export default function SettingsPage() {
         standup_enabled: config.standup_enabled,
       })
       .eq('id', config.id)
-    if (error) { toast.error('Failed to save'); addLog('error', 'Save failed') }
-    else        { toast.success('Settings saved'); addLog('ok', 'Settings saved') }
+    if (error) {
+      toast.error('Failed to save')
+      await addAuditLog('error', 'Save failed', 'settings.config.save')
+    } else {
+      toast.success('Settings saved')
+      await addAuditLog('ok', 'Settings saved', 'settings.config.save')
+    }
     setSaving(false)
   }
 
   async function handleTestStandup() {
     setTesting(true)
-    addLog('info', 'Sending DSU to Telegram...')
+    await addAuditLog('info', 'Sending DSU to Telegram...', 'settings.standup.send')
     const res  = await fetch('/api/standup', { method: 'POST' })
     const data = await res.json()
-    if (data.ok) { toast.success('Standup sent!'); addLog('ok', 'DSU delivered') }
-    else          { toast.error(data.error || 'Failed'); addLog('error', data.error || 'Delivery failed') }
+    if (data.ok) {
+      toast.success('Standup sent!')
+      await addAuditLog('ok', 'DSU delivered', 'settings.standup.send')
+    } else {
+      toast.error(data.error || 'Failed')
+      await addAuditLog('error', data.error || 'Delivery failed', 'settings.standup.send')
+    }
     setTesting(false)
   }
 
   async function handlePreview() {
     setPreviewing(true)
-    addLog('info', 'Generating preview...')
+    await addAuditLog('info', 'Generating preview...', 'settings.standup.preview')
     const res  = await fetch('/api/standup')
     const data = await res.json()
-    if (data.ok) { setPreviewMsg(data.message); addLog('ok', 'Preview generated') }
-    else          { toast.error(data.error || 'Failed'); addLog('error', data.error || 'Preview failed') }
+    if (data.ok) {
+      setPreviewMsg(data.message)
+      await addAuditLog('ok', 'Preview generated', 'settings.standup.preview')
+    } else {
+      toast.error(data.error || 'Failed')
+      await addAuditLog('error', data.error || 'Preview failed', 'settings.standup.preview')
+    }
     setPreviewing(false)
   }
 
@@ -473,28 +514,28 @@ export default function SettingsPage() {
                     letterSpacing: '0.15em',
                   }}
                 >
-                  Activity Log
+                  Audit Log
                 </p>
-                {logs.length > 0 && (
-                  <button
-                    onClick={() => setLogs([])}
-                    className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    Clear
-                  </button>
-                )}
+                <button
+                  onClick={fetchAuditLogs}
+                  className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Refresh
+                </button>
               </div>
 
               <div
                 className="p-3 space-y-1.5 min-h-14 max-h-48 overflow-y-auto styled-scroll"
                 style={{ fontFamily: 'var(--font-jetbrains-mono)' }}
               >
-                {logs.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground/50">Waiting for activity...</p>
+                {loadingAudit ? (
+                  <p className="text-[11px] text-muted-foreground/60">Loading audit log...</p>
+                ) : auditLogs.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground/50">No audit entries yet.</p>
                 ) : (
-                  logs.map((entry, i) => (
-                    <div key={i} className="flex items-start gap-2">
-                      <span className="text-[10px] text-muted-foreground shrink-0">{entry.time}</span>
+                  auditLogs.map((entry) => (
+                    <div key={entry.id} className="flex items-start gap-2">
+                      <span className="text-[10px] text-muted-foreground shrink-0">{formatAuditTime(entry.created_at)}</span>
                       <span
                         className="text-[10px] shrink-0"
                         style={{
@@ -505,7 +546,7 @@ export default function SettingsPage() {
                       >
                         {entry.status === 'ok' ? '✓' : entry.status === 'error' ? '✗' : '·'}
                       </span>
-                      <span className="text-xs text-foreground/70">{entry.msg}</span>
+                      <span className="text-xs text-foreground/70">{entry.message}</span>
                     </div>
                   ))
                 )}

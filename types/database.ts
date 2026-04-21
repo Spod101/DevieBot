@@ -80,6 +80,17 @@ export interface TelegramConfig {
   updated_at: string
 }
 
+export type AuditLogStatus = 'ok' | 'error' | 'info'
+
+export interface AuditLog {
+  id: string
+  action: string
+  status: AuditLogStatus
+  message: string
+  meta: Record<string, unknown>
+  created_at: string
+}
+
 // Supabase Database type
 export type Database = {
   public: {
@@ -130,6 +141,12 @@ export type Database = {
         Row: TelegramConfig
         Insert: Omit<TelegramConfig, 'id' | 'updated_at'>
         Update: Partial<Omit<TelegramConfig, 'id' | 'updated_at'>>
+        Relationships: []
+      }
+      audit_logs: {
+        Row: AuditLog
+        Insert: Omit<AuditLog, 'id' | 'created_at'>
+        Update: Partial<Omit<AuditLog, 'id' | 'created_at'>>
         Relationships: []
       }
     }
