@@ -44,6 +44,22 @@ export function addDaysToISODate(isoDate: string, days: number): string {
   return toUTCISODate(utc)
 }
 
+export function addBusinessDaysToISODate(isoDate: string, businessDays: number): string {
+  const [year, month, day] = isoDate.split('-').map(Number)
+  const utc = new Date(Date.UTC(year, month - 1, day))
+
+  let remaining = Math.max(0, businessDays)
+  while (remaining > 0) {
+    utc.setUTCDate(utc.getUTCDate() + 1)
+    const weekday = utc.getUTCDay()
+    if (weekday !== 0 && weekday !== 6) {
+      remaining -= 1
+    }
+  }
+
+  return toUTCISODate(utc)
+}
+
 export function getWeekdayFromISODate(isoDate: string): number {
   const [year, month, day] = isoDate.split('-').map(Number)
   return new Date(Date.UTC(year, month - 1, day)).getUTCDay()

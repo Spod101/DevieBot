@@ -5,12 +5,12 @@ import {
   VALID_STANDUP_FILTERS, type StandupFilter,
 } from '@/lib/standup'
 import { parseBulkTasks, parseMessage, parseStatus, cleanTaskTitle } from '@/lib/nlp'
-import { addDaysToISODate, getTodayInAppTimeZoneISO } from '@/lib/date'
+import { addBusinessDaysToISODate, addDaysToISODate, getTodayInAppTimeZoneISO } from '@/lib/date'
 import type { TaskStatus } from '@/types/database'
 
-/** Returns a due date 7 days from today (ISO YYYY-MM-DD) */
+/** Returns a due date 3 business days from today (ISO YYYY-MM-DD) */
 function defaultDueDate(): string {
-  return addDaysToISODate(getTodayInAppTimeZoneISO(), 7)
+  return addBusinessDaysToISODate(getTodayInAppTimeZoneISO(), 3)
 }
 
 /** Validates an ISO date string; returns it or null */
@@ -689,7 +689,7 @@ export async function POST(request: Request) {
         `/deadlines — show upcoming deadlines\n` +
         `/standup — send the standup report\n\n` +
         `➕ <b>Create</b>\n` +
-        `/addtask &lt;title&gt; — add a task (7-day deadline by default)\n` +
+        `/addtask &lt;title&gt; — add a task (3 business-day deadline by default)\n` +
         `/addtask &lt;title&gt; by Friday — add a task with a specific deadline\n` +
         `/addtask &lt;title&gt; @username — add a task and assign it to someone\n\n` +
         `✏️ <b>Update</b>\n` +
