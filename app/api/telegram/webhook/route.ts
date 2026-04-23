@@ -521,6 +521,21 @@ async function resolveAssigneeByName(
   return { title: text.trim(), assignee: null }
 }
 
+// Returns the sender's display name for auto-assignment, or null if they are an admin
+// (admins get unassigned tasks by default; non-admins are auto-assigned as the creator).
+async function resolveAuthorAssignee(
+  telegramId: number,
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('members')
+    .select('name, telegram_username, role')
+    .eq('telegram_id', String(telegramId))
+    .maybeSingle()
+  if (!data || data.role?.toLowerCase() === 'admin') return null
+  return data.name ?? data.telegram_username ?? null
+}
+
 // Auto-register (or update) a member from their Telegram profile
 async function syncMember(from: {
   id: number
@@ -651,6 +666,10 @@ export async function POST(request: Request) {
     if (message.from && !message.from.is_bot) {
       await syncMember(message.from, supabase)
     }
+
+    // Resolved once per request: the sender's name for auto-assignment.
+    // Null when the sender is an admin (admins get unassigned tasks by default).
+    const authorAssignee = senderId ? await resolveAuthorAssignee(senderId, supabase) : null
 
     // Strip bot username suffix only when directly attached to a command (e.g. /help@MyBot → /help)
     const normalized = text.replace(/^(\/\w+)@\w+/, '$1').trim()
@@ -960,7 +979,7 @@ export async function POST(request: Request) {
           const inserts = parsed.map(t => ({
             title: t.title, status: 'todo' as TaskStatus,
             priority: t.priority, order_index: 0,
-            assigned_to: t.assignee === 'unassigned' ? null : t.assignee, camp_id: null,
+            assigned_to: t.assignee === 'unassigned' ? (authorAssignee ?? null) : t.assignee, camp_id: null,
             due_date: validDate(t.dueDate) ?? defaultDueDate(),
             description: t.description ?? null,
           }))
@@ -994,13 +1013,13 @@ export async function POST(request: Request) {
           const due = cleaned.dueDate ?? defaultDueDate()
           const { data: task, error } = await supabase
             .from('tasks')
-            .insert({ title: finalTitle, status: 'todo', priority: cleaned.priority, order_index: 0, assigned_to: assignee, due_date: due })
+            .insert({ title: finalTitle, status: 'todo', priority: cleaned.priority, order_index: 0, assigned_to: assignee ?? authorAssignee, due_date: due })
             .select().single()
           if (error || !task) {
             await reply('❌ Something went wrong while creating the task. Please try again.')
           } else {
             if (simpleLink) await supabase.from('task_comments').insert({ task_id: task.id, content: simpleLink })
-            await reply(taskAddedMsg({ ...task, priority: cleaned.priority, due_date: due, assigned_to: assignee }, null, simpleLink))
+            await reply(taskAddedMsg({ ...task, priority: cleaned.priority, due_date: due, assigned_to: assignee ?? authorAssignee }, null, simpleLink))
           }
           return NextResponse.json({ ok: true })
         }
@@ -1123,13 +1142,13 @@ export async function POST(request: Request) {
         const due = validDate(parsedDue) ?? defaultDueDate()
         const { data: task, error } = await supabase
           .from('tasks')
-          .insert({ title, status: 'todo', priority: validPriority, order_index: 0, camp_id: null, assigned_to: assignedTo ?? null, due_date: due, description: null })
+          .insert({ title, status: 'todo', priority: validPriority, order_index: 0, camp_id: null, assigned_to: assignedTo ?? authorAssignee ?? null, due_date: due, description: null })
           .select().single()
         if (error || !task) {
           await reply('❌ Failed to create task.')
         } else {
           const t3 = esc(task.title)
-          await reply(taskAddedMsg({ ...task, priority: validPriority, due_date: due, assigned_to: assignedTo ?? null }, campName))
+          await reply(taskAddedMsg({ ...task, priority: validPriority, due_date: due, assigned_to: assignedTo ?? authorAssignee ?? null }, campName))
         }
         return NextResponse.json({ ok: true })
       }
