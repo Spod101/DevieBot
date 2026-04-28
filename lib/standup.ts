@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createServiceClient } from '@/lib/supabase/service'
+import { getTodayInAppTimeZoneISO, getWeekdayFromISODate, addDaysToISODate } from '@/lib/date'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -24,17 +25,28 @@ const PRIORITY_BADGE: Record<string, string> = {
   urgent: ' 🔴', high: ' 🟠', medium: '', low: '',
 }
 
-// ── Quote (Haiku-generated) ───────────────────────────────────────────────────
+// ── Quote (Haiku-generated, verbatim from curated books) ─────────────────────
 
 async function dailyQuote(): Promise<string> {
   try {
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5',
-      max_tokens: 120,
+      max_tokens: 200,
       messages: [{
         role: 'user',
-        content: 'Give me one short motivational or inspirational quote suitable for a tech team\'s daily standup. Reply with only the quote and the author in this exact format — no extra text:\n"<quote>" — <Author>',
+        content: [
+          'Give me one verbatim quote from one of these books (choose randomly — vary the book each time):',
+          '- "How to Say It" by Rosalie Maggio',
+          '- "Startup Mindsets" by Earl Valencia and Dan Gonzales',
+          '- "Simply Said" by Jay Sullivan',
+          '- "The Making of a Manager" by Julie Zhuo',
+          '- "Outliers: The Story of Success" by Malcolm Gladwell',
+          '- "Zero to One" by Peter Thiel',
+          '',
+          'Reply with only the quote, the author, and the book title in this exact format — no extra text:',
+          '"<quote>" — <Author>, <Book Title>',
+        ].join('\n'),
       }],
     })
     const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : ''
@@ -50,6 +62,38 @@ async function dailyQuote(): Promise<string> {
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** Returns ISO bounds for the current and previous Sun–Sat week. */
+function getWeekBounds(todayISO: string) {
+  const dow = getWeekdayFromISODate(todayISO) // 0=Sun … 6=Sat
+  const weekStart    = addDaysToISODate(todayISO, -dow)
+  const weekEnd      = addDaysToISODate(weekStart, 6)
+  const lastWeekStart = addDaysToISODate(weekStart, -7)
+  const lastWeekEnd  = addDaysToISODate(weekStart, -1)
+  return { weekStart, weekEnd, lastWeekStart, lastWeekEnd }
+}
+
+/** Extracts the ISO date (YYYY-MM-DD) in Asia/Manila tz from a UTC timestamp. */
+function manilaDayOf(timestamp: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(timestamp))
+  const y = parts.find(p => p.type === 'year')?.value
+  const m = parts.find(p => p.type === 'month')?.value
+  const d = parts.find(p => p.type === 'day')?.value
+  return `${y}-${m}-${d}`
+}
+
+/** Formats two ISO dates as "Apr 27 – May 3". */
+function formatWeekLabel(startISO: string, endISO: string): string {
+  const fmt = (iso: string) => {
+    const [y, mo, d] = iso.split('-').map(Number)
+    return new Date(Date.UTC(y, mo - 1, d))
+      .toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+  }
+  return `${fmt(startISO)} – ${fmt(endISO)}`
 }
 
 function taskLine(t: any): string {
@@ -75,16 +119,22 @@ function greeting(): string {
 // ── Data ──────────────────────────────────────────────────────────────────────
 
 export type StandupData = {
-  dateStr:     string
-  overdue:     any[]
-  blocked:     any[]
-  inProgress:  any[]
-  inReview:    any[]
-  todo:        any[]
-  backlog:     any[]
-  done:        any[]
-  activeCount: number
-  doneCount:   number
+  dateStr:       string
+  weekStart:     string   // ISO, e.g. "2026-04-27" (Sunday)
+  weekEnd:       string   // ISO, e.g. "2026-05-03" (Saturday)
+  lastWeekStart: string
+  lastWeekEnd:   string
+  overdue:       any[]
+  blocked:       any[]
+  inProgress:    any[]
+  inReview:      any[]
+  todo:          any[]
+  backlog:       any[]
+  done:          any[]   // all done tasks (for Done tab)
+  doneThisWeek:  any[]  // done tasks updated within this Sun–Sat
+  doneLastWeek:  any[]  // done tasks updated within last Sun–Sat
+  activeCount:   number
+  doneCount:     number
 }
 
 export async function fetchStandupData(): Promise<StandupData> {
@@ -92,7 +142,7 @@ export async function fetchStandupData(): Promise<StandupData> {
 
   const { data, error } = await supabase
     .from('tasks')
-    .select('id, task_number, title, status, priority, due_date, assigned_to')
+    .select('id, task_number, title, status, priority, due_date, assigned_to, updated_at')
     .order('priority', { ascending: false })
 
   if (error) console.error('[standup] tasks query error:', error.message)
@@ -106,6 +156,9 @@ export async function fetchStandupData(): Promise<StandupData> {
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
   })
 
+  const todayISO = getTodayInAppTimeZoneISO()
+  const { weekStart, weekEnd, lastWeekStart, lastWeekEnd } = getWeekBounds(todayISO)
+
   const overdue    = tasks.filter(t => t.due_date && new Date(t.due_date) < today && t.status !== 'done')
   const blocked    = tasks.filter(t => t.status === 'blocked')
   const inProgress = tasks.filter(t => t.status === 'in_progress')
@@ -114,8 +167,21 @@ export async function fetchStandupData(): Promise<StandupData> {
   const backlog    = tasks.filter(t => t.status === 'backlog')
   const done       = tasks.filter(t => t.status === 'done')
 
+  const doneThisWeek = done.filter(t => {
+    if (!t.updated_at) return false
+    const d = manilaDayOf(t.updated_at)
+    return d >= weekStart && d <= weekEnd
+  })
+  const doneLastWeek = done.filter(t => {
+    if (!t.updated_at) return false
+    const d = manilaDayOf(t.updated_at)
+    return d >= lastWeekStart && d <= lastWeekEnd
+  })
+
   return {
-    dateStr, overdue, blocked, inProgress, inReview, todo, backlog, done,
+    dateStr, weekStart, weekEnd, lastWeekStart, lastWeekEnd,
+    overdue, blocked, inProgress, inReview, todo, backlog, done,
+    doneThisWeek, doneLastWeek,
     activeCount: blocked.length + inProgress.length + inReview.length + todo.length,
     doneCount:   done.length,
   }
@@ -151,7 +217,24 @@ export async function buildStandupPage(
     if (data.blocked.length)  flags.push(`🚧 ${data.blocked.length} blocked`)
     if (flags.length) text += `\n\n<i>Heads up: ${flags.join(' · ')} — use the buttons below to review.</i>`
 
-    text += `\n\n📚 <b>Reminder:</b> <i>Read and finish your assigned books, cohorts! Consistency compounds.</i>`
+    // Done this week
+    const thisWeekLabel = formatWeekLabel(data.weekStart, data.weekEnd)
+    text += `\n\n✅ <b>Done this week</b> <i>(${thisWeekLabel})</i>`
+    if (data.doneThisWeek.length === 0) {
+      text += `\n<i>No tasks completed this week yet.</i>`
+    } else {
+      text += '\n'
+      data.doneThisWeek.forEach(t => { text += taskLine(t) + '\n' })
+    }
+
+    // Done last week
+    if (data.doneLastWeek.length > 0) {
+      const lastWeekLabel = formatWeekLabel(data.lastWeekStart, data.lastWeekEnd)
+      text += `\n📅 <b>Last week</b> <i>(${lastWeekLabel})</i>\n`
+      data.doneLastWeek.forEach(t => { text += taskLine(t) + '\n' })
+    }
+
+    text += `\n📚 <b>Reminder:</b> <i>Read and finish your assigned books, cohorts! Consistency compounds.</i>`
 
     const quote = await dailyQuote()
     if (quote) text += `\n\n${quote}`

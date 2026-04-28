@@ -64,3 +64,13 @@ export function getWeekdayFromISODate(isoDate: string): number {
   const [year, month, day] = isoDate.split('-').map(Number)
   return new Date(Date.UTC(year, month - 1, day)).getUTCDay()
 }
+
+/** Returns the nearest upcoming Tuesday (2) or Thursday (4) after today (ISO YYYY-MM-DD). */
+export function getNextOnsiteDay(todayISO: string = getTodayInAppTimeZoneISO()): string {
+  const [year, month, day] = todayISO.split('-').map(Number)
+  const utc = new Date(Date.UTC(year, month - 1, day))
+  do {
+    utc.setUTCDate(utc.getUTCDate() + 1)
+  } while (utc.getUTCDay() !== 2 && utc.getUTCDay() !== 4)
+  return toUTCISODate(utc)
+}
