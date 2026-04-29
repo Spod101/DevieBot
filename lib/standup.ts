@@ -107,6 +107,13 @@ function taskLine(t: any): string {
   return `▸ ${code}${title}${badge}${assignee}${due}`
 }
 
+function doneTaskLine(t: any): string {
+  const code     = t.task_number ? `<code>T-${String(t.task_number).padStart(3, '0')}</code> ` : ''
+  const title    = esc(t.title)
+  const assignee = t.assigned_to ? ` — ${esc(t.assigned_to)}` : ''
+  return `▸ ${code}${title}${assignee}`
+}
+
 function greeting(): string {
   const hour = parseInt(
     new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila', hour: 'numeric', hour12: false })
@@ -224,7 +231,7 @@ export async function buildStandupPage(
       text += `\n<i>No tasks completed this week yet.</i>`
     } else {
       text += '\n'
-      data.doneThisWeek.forEach(t => { text += taskLine(t) + '\n' })
+      data.doneThisWeek.forEach(t => { text += doneTaskLine(t) + '\n' })
     }
 
     text += `\n📚 <b>Reminder:</b> <i>Read and finish your assigned books, cohorts! Consistency compounds.</i>`
