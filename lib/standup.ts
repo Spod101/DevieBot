@@ -218,12 +218,6 @@ export async function buildStandupPage(
     text += `✅ Done: <b>${data.doneCount}</b>\n`
     text += `🚧 Blocked: <b>${data.blocked.length}</b>`
 
-    // Attention line — only shown when there's something that needs it
-    const flags: string[] = []
-    if (data.overdue.length)  flags.push(`⏰ ${data.overdue.length} overdue`)
-    if (data.blocked.length)  flags.push(`🚧 ${data.blocked.length} blocked`)
-    if (flags.length) text += `\n\n<i>Heads up: ${flags.join(' · ')} — use the buttons below to review.</i>`
-
     // Done this week
     const thisWeekLabel = formatWeekLabel(data.weekStart, data.weekEnd)
     text += `\n\n✅ <b>Done this week</b> <i>(${thisWeekLabel})</i>`
