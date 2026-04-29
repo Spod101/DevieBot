@@ -227,13 +227,6 @@ export async function buildStandupPage(
       data.doneThisWeek.forEach(t => { text += taskLine(t) + '\n' })
     }
 
-    // Done last week
-    if (data.doneLastWeek.length > 0) {
-      const lastWeekLabel = formatWeekLabel(data.lastWeekStart, data.lastWeekEnd)
-      text += `\n📅 <b>Last week</b> <i>(${lastWeekLabel})</i>\n`
-      data.doneLastWeek.forEach(t => { text += taskLine(t) + '\n' })
-    }
-
     text += `\n📚 <b>Reminder:</b> <i>Read and finish your assigned books, cohorts! Consistency compounds.</i>`
 
     const quote = await dailyQuote()
